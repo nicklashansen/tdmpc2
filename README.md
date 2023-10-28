@@ -35,7 +35,7 @@ cd docker && docker build . -t <user>/tdmpc2:0.1.0
 If you prefer to install dependencies manually, start by installing dependencies via `conda` by running
 
 ```
-conda env create -f docker/environment.yml
+conda env create -f docker/environment.yaml
 ```
 
 If you want to run ManiSkill2, you will additionally need to download and link the necessary assets by running
