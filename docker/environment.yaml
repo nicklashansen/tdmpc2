@@ -2,7 +2,6 @@ name: tdmpc2
 channels:
   - pytorch-nightly
   - nvidia
-  - anaconda
   - conda-forge
   - defaults
 dependencies:
@@ -10,58 +9,44 @@ dependencies:
   - pytorch
   - torchvision
   - cudatoolkit=11.7
-  - fluidsynth
-  - portaudio
   - glew
   - glib
-  - pillow
-  - pip
+  - pip==21
   - pip:
     - absl-py
-    - click
-    - cloudpickle
-    - gpustat
     - glfw
     - kornia
     - termcolor
     - gym==0.21.0
-    - pandas
     - moviepy
     - ffmpeg
     - imageio
     - imageio-ffmpeg
-    - lxml
-    - pyparsing
     - omegaconf
     - hydra-core
     - hydra-submitit-launcher
     - submitit
     - patchelf
     - protobuf
-    - scipy
     - tqdm
-    - xmltodict
     - transforms3d
     - joblib
-    - scikit-image
-    - einops
     - opencv-python
     - opencv-contrib-python
     - filelock
     - sapien==2.2.1
     - mani-skill2==0.4.1
-    - tabulate
-    - h5py
     - trimesh
     - open3d
-    - rtree
-    - seaborn
+    - setuptools==65.5.0
+    - "cython<3"
     - mujoco==2.3.1
     - mujoco-py==2.1.2.14
     - dm-control
-    - plotly
+    - pillow
     - pyquaternion
     - git+https://github.com/Farama-Foundation/Metaworld.git@04be337a12305e393c0caf0cbf5ec7755c7c8feb
     # - myosuite # MyoSuite requires gym==0.13.0 which conflicts with Meta-World & ManiSkill2, install separately if needed
     - tensordict-nightly
     - torchrl-nightly
+    - wandb

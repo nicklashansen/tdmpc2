@@ -17,9 +17,6 @@ class Ensemble(nn.Module):
 		self.params = nn.ParameterList([nn.Parameter(p) for p in params])
 		self._repr = str(modules)
 
-	def modules(self):
-		return self.vmap.__wrapped__.stateless_model
-
 	def forward(self, *args, **kwargs):
 		return self.vmap([p for p in self.params], (), *args, **kwargs)
 
