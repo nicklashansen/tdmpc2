@@ -40,12 +40,13 @@ def parse_cfg(cfg: OmegaConf) -> OmegaConf:
 	cfg.bin_size = (cfg.vmax - cfg.vmin) / (cfg.num_bins-1) # Bin size for discrete regression
 
 	# Model size
-	assert cfg.model_size in MODEL_SIZE.keys(), \
-		f'Invalid model size {cfg.model_size}. Must be one of {list(MODEL_SIZE.keys())}'
-	for k, v in MODEL_SIZE[cfg.model_size].items():
-		cfg[k] = v
-	if cfg.task == 'mt30' and cfg.model_size == 19:
-		cfg.latent_dim = 512 # This checkpoint is slightly smaller
+	if cfg.get('model_size', None) is not None:
+		assert cfg.model_size in MODEL_SIZE.keys(), \
+			f'Invalid model size {cfg.model_size}. Must be one of {list(MODEL_SIZE.keys())}'
+		for k, v in MODEL_SIZE[cfg.model_size].items():
+			cfg[k] = v
+		if cfg.task == 'mt30' and cfg.model_size == 19:
+			cfg.latent_dim = 512 # This checkpoint is slightly smaller
 
 	# Multi-task
 	cfg.multitask = cfg.task in TASK_SET.keys()

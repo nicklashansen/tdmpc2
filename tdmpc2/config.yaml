@@ -49,7 +49,7 @@ vmin: -10
 vmax: +10
 
 # architecture
-model_size: 5
+model_size: ???
 num_enc_layers: 2
 enc_dim: 256
 mlp_dim: 512
