@@ -37,13 +37,13 @@ class Buffer():
 		return ReplayBuffer(
 			storage=storage,
 			sampler=SliceSampler(
-				slice_len=self.cfg.horizon+1,
+				num_slices=self.cfg.batch_size,
 				end_key=None,
 				traj_key='episode',
 				truncated_key=None,
 			),
 			pin_memory=True,
-			prefetch=2,
+			prefetch=1,
 			batch_size=self.cfg.batch_size,
 		)
 
