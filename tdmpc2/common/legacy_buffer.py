@@ -2,9 +2,30 @@ from pathlib import Path
 import torch
 from tensordict.tensordict import TensorDict
 from torchrl.data.replay_buffers import ReplayBuffer, LazyTensorStorage
+from torchrl.data.replay_buffers.samplers import RandomSampler
+from torchrl.envs import RandomCropTensorDict, Transform, Compose
 
 from common.logger import make_dir
-from common.samplers import SliceSampler
+
+
+class DataPrepTransform(Transform):
+	"""
+	Preprocesses data for TD-MPC2 training.
+	Replay data is expected to be a TensorDict with the following keys:
+		obs: observations
+		action: actions
+		reward: rewards
+		task: task IDs (optional)
+	A TensorDict with T time steps has T+1 observations and T actions and rewards.
+	The first actions and rewards in each TensorDict are dummies and should be ignored.
+	"""
+
+	def __init__(self):
+		super().__init__([])
+	
+	def forward(self, td):
+		td = td.permute(1,0)
+		return td['obs'], td['action'][1:], td['reward'][1:].unsqueeze(-1), (td['task'][0] if 'task' in td.keys() else None)
 
 
 class Buffer():
@@ -16,8 +37,7 @@ class Buffer():
 	def __init__(self, cfg):
 		self.cfg = cfg
 		self._device = torch.device('cuda')
-		self._batch_size = self.cfg.batch_size * (self.cfg.horizon+1)
-		self._capacity = min(cfg.buffer_size, cfg.steps)
+		self._capacity = min(cfg.buffer_size, cfg.steps)//cfg.episode_length
 		self._num_eps = 0
 
 	@property
@@ -33,17 +53,19 @@ class Buffer():
 	def _reserve_buffer(self, storage):
 		"""
 		Reserve a buffer with the given storage.
+		Uses the RandomSampler to sample trajectories,
+		and the RandomCropTensorDict transform to crop trajectories to the desired length.
+		DataPrepTransform is used to preprocess data to the expected format in TD-MPC2 updates.
 		"""
 		return ReplayBuffer(
 			storage=storage,
-			sampler=SliceSampler(
-				slice_len=self.cfg.horizon+1,
-				end_key=None,
-				traj_key='episode',
-				truncated_key=None,
-			),
+			sampler=RandomSampler(),
 			pin_memory=True,
-			prefetch=2,
+			prefetch=1,
+			transform=Compose(
+				RandomCropTensorDict(self.cfg.horizon+1, -1),
+				DataPrepTransform(),
+			),
 			batch_size=self.cfg.batch_size,
 		)
 
@@ -71,25 +93,21 @@ class Buffer():
 			)
 
 	def add(self, tds):
-		"""Add a step to the buffer."""
-		tds['episode'] = torch.ones_like(tds['reward'], dtype=torch.int64) * self._num_eps
-		tds['step'] = torch.arange(0, len(tds))
+		"""Add an episode to the buffer. All episodes are expected to have the same length."""
 		if self._num_eps == 0:
 			self._buffer = self._init(tds)
-		self._buffer.extend(tds)
+		self._buffer.add(tds)
 		self._num_eps += 1
 		return self._num_eps
 
 	def sample(self):
 		"""Sample a batch of sub-trajectories from the buffer."""
-		td = self._buffer.sample(batch_size=self._batch_size) \
-			.view(-1, self.cfg.horizon+1).permute(1, 0)
-		obs = td['obs'].to(self._device, non_blocking=True)
-		action = td['action'][1:].to(self._device, non_blocking=True)
-		reward = td['reward'][1:].unsqueeze(-1).to(self._device, non_blocking=True)
-		task = td['task'][0].to(self._device, non_blocking=True) if 'task' in td.keys() else None
-		return obs, action, reward, task
-		
+		obs, action, reward, task = self._buffer.sample(batch_size=self.cfg.batch_size)
+		return obs.to(self._device, non_blocking=True), \
+			   action.to(self._device, non_blocking=True), \
+			   reward.to(self._device, non_blocking=True), \
+			   task.to(self._device, non_blocking=True) if task is not None else None
+
 	def save(self):
 		"""Save the buffer to disk. Useful for storing offline datasets."""
 		td = self._buffer._storage._storage.cpu()
