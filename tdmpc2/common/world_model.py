@@ -97,7 +97,9 @@ class WorldModel(nn.Module):
 		"""
 		if self.cfg.multitask:
 			obs = self.task_emb(obs, task)
-		return self._encoder['state'](obs)
+		if self.cfg.obs == 'rgb' and obs.ndim == 5:
+			return torch.stack([self._encoder[self.cfg.obs](o) for o in obs])
+		return self._encoder[self.cfg.obs](obs)
 
 	def next(self, z, a, task):
 		"""
