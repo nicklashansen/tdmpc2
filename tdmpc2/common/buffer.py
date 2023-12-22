@@ -2,30 +2,10 @@ from pathlib import Path
 import torch
 from tensordict.tensordict import TensorDict
 from torchrl.data.replay_buffers import ReplayBuffer, LazyTensorStorage
-from torchrl.data.replay_buffers.samplers import RandomSampler
 from torchrl.envs import RandomCropTensorDict, Transform, Compose
 
 from common.logger import make_dir
-
-
-class DataPrepTransform(Transform):
-	"""
-	Preprocesses data for TD-MPC2 training.
-	Replay data is expected to be a TensorDict with the following keys:
-		obs: observations
-		action: actions
-		reward: rewards
-		task: task IDs (optional)
-	A TensorDict with T time steps has T+1 observations and T actions and rewards.
-	The first actions and rewards in each TensorDict are dummies and should be ignored.
-	"""
-
-	def __init__(self):
-		super().__init__([])
-	
-	def forward(self, td):
-		td = td.permute(1,0)
-		return td['obs'], td['action'][1:], td['reward'][1:].unsqueeze(-1), (td['task'][0] if 'task' in td.keys() else None)
+from common.samplers import SliceSampler
 
 
 class Buffer():
@@ -37,7 +17,9 @@ class Buffer():
 	def __init__(self, cfg):
 		self.cfg = cfg
 		self._device = torch.device('cuda')
-		self._capacity = min(cfg.buffer_size, cfg.steps)//cfg.episode_length
+		self._batch_size = self.cfg.batch_size * (self.cfg.horizon+1)
+		self._capacity = min(cfg.buffer_size, cfg.steps)
+		self._num_steps = 0
 		self._num_eps = 0
 
 	@property
@@ -46,6 +28,11 @@ class Buffer():
 		return self._capacity
 	
 	@property
+	def num_steps(self):
+		"""Return the number of steps in the buffer."""
+		return self._num_steps
+
+	@property
 	def num_eps(self):
 		"""Return the number of episodes in the buffer."""
 		return self._num_eps
@@ -53,32 +40,25 @@ class Buffer():
 	def _reserve_buffer(self, storage):
 		"""
 		Reserve a buffer with the given storage.
-		Uses the RandomSampler to sample trajectories,
-		and the RandomCropTensorDict transform to crop trajectories to the desired length.
-		DataPrepTransform is used to preprocess data to the expected format in TD-MPC2 updates.
 		"""
 		return ReplayBuffer(
 			storage=storage,
-			sampler=RandomSampler(),
-			pin_memory=True,
-			prefetch=1,
-			transform=Compose(
-				RandomCropTensorDict(self.cfg.horizon+1, -1),
-				DataPrepTransform(),
+			sampler=SliceSampler(
+				slice_len=self.cfg.horizon+1,
+				end_key='done',
+				truncated_key=None,
 			),
+			pin_memory=True,
+			prefetch=2,
 			batch_size=self.cfg.batch_size,
 		)
 
-	def _init(self, tds):
+	def _init(self, td):
 		"""Initialize the replay buffer. Use the first episode to estimate storage requirements."""
 		mem_free, _ = torch.cuda.mem_get_info()
-		bytes_per_ep = sum([
-				(v.numel()*v.element_size() if not isinstance(v, TensorDict) \
-				else sum([x.numel()*x.element_size() for x in v.values()])) \
-			for k,v in tds.items()
-		])		
-		print(f'Bytes per episode: {bytes_per_ep:,}')
-		total_bytes = bytes_per_ep*self._capacity
+		bytes_per_step = sum([x.numel()*x.element_size() for x in td[0].values()])
+		print(f'Bytes per step: {bytes_per_step:,}')
+		total_bytes = bytes_per_step*self._capacity
 		print(f'Storage required: {total_bytes/1e9:.2f} GB')
 		# Heuristic: decide whether to use CUDA or CPU memory
 		if 2.5*total_bytes > mem_free: # Insufficient CUDA memory
@@ -92,22 +72,29 @@ class Buffer():
 				LazyTensorStorage(self._capacity, device=torch.device('cuda'))
 			)
 
-	def add(self, tds):
-		"""Add an episode to the buffer. All episodes are expected to have the same length."""
-		if self._num_eps == 0:
-			self._buffer = self._init(tds)
-		self._buffer.add(tds)
-		self._num_eps += 1
-		return self._num_eps
+	def add(self, td):
+		"""Add a step to the buffer."""
+		done = bool(td['done'].any())
+		if done:
+			self._num_eps +=1
+		td['episode'] = torch.ones_like(td['done']) * self._num_eps
+		td['step'] = torch.arange(0, len(td))
+		if self._num_steps == 0:
+			self._buffer = self._init(td)
+		self._buffer.extend(td)
+		self._num_steps += 1
+		return self._num_steps
 
 	def sample(self):
 		"""Sample a batch of sub-trajectories from the buffer."""
-		obs, action, reward, task = self._buffer.sample(batch_size=self.cfg.batch_size)
-		return obs.to(self._device, non_blocking=True), \
-			   action.to(self._device, non_blocking=True), \
-			   reward.to(self._device, non_blocking=True), \
-			   task.to(self._device, non_blocking=True) if task is not None else None
-
+		td = self._buffer.sample(batch_size=self._batch_size) \
+			.reshape(-1, self.cfg.horizon+1).permute(1, 0)
+		obs = td['obs'].to(self._device, non_blocking=True)
+		action = td['action'][1:].to(self._device, non_blocking=True)
+		reward = td['reward'][1:].unsqueeze(-1).to(self._device, non_blocking=True)
+		task = td['task'][0].to(self._device, non_blocking=True) if 'task' in td.keys() else None
+		return obs, action, reward, task
+		
 	def save(self):
 		"""Save the buffer to disk. Useful for storing offline datasets."""
 		td = self._buffer._storage._storage.cpu()

@@ -60,11 +60,11 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: ???
-wandb_entity: ???
+wandb_project: tdmpcv2
+wandb_entity: nicklashansen
 wandb_silent: false
-disable_wandb: true
-save_csv: true
+disable_wandb: false
+save_csv: false
 
 # misc
 save_video: true
