@@ -49,11 +49,11 @@ def print_run(cfg):
 			prefix + colored(f'{k.capitalize()+":":<15}', color, attrs=attrs), _limstr(v)
 		)
 
-	obs_dim = cfg.obs_shape['state'][0] if 'state' in cfg.obs_shape else cfg.obs_shape[0]
+	observations  = ", ".join([str(v) for v in cfg.obs_shape.values()])
 	kvs = [
 		("task", cfg.task_title),
 		("steps", f"{int(cfg.steps):,}"),
-		("observations", obs_dim),
+		("observations", observations),
 		("actions", cfg.action_dim),
 		("experiment", cfg.exp_name),
 	]

@@ -3,6 +3,7 @@ defaults:
 
 # environment
 task: dog-run
+obs: state
 
 # evaluation
 checkpoint: ???
@@ -52,6 +53,7 @@ vmax: +10
 model_size: ???
 num_enc_layers: 2
 enc_dim: 256
+num_channels: 32
 mlp_dim: 512
 latent_dim: 512
 task_dim: 96
