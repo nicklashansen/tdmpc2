@@ -53,10 +53,10 @@ class Buffer():
 		bytes_per_ep = sum([
 				(v.numel()*v.element_size() if not isinstance(v, TensorDict) \
 				else sum([x.numel()*x.element_size() for x in v.values()])) \
-			for k,v in tds.items()
-		])		
+			for v in tds.values()
+		])
 		print(f'Bytes per episode: {bytes_per_ep:,}')
-		total_bytes = bytes_per_ep*self._capacity
+		total_bytes = bytes_per_ep * (self._capacity // self.cfg.episode_length)
 		print(f'Storage required: {total_bytes/1e9:.2f} GB')
 		# Heuristic: decide whether to use CUDA or CPU memory
 		if 2.5*total_bytes > mem_free: # Insufficient CUDA memory
