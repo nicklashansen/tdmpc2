@@ -10,19 +10,19 @@ from common.buffer import CropBuffer, SliceBuffer
 
 @hydra.main(config_name='config', config_path='.')
 def test_buffer(cfg: dict):
-	cfg.episode_length = 12
+	cfg.episode_length = 11
 	cfg.batch_size = 8
 
 	transitions0 = [TensorDict(dict(
 			obs=torch.tensor([0., 1., 2., 3., 4.]).unsqueeze(0) + t,
-			action=torch.tensor([-1.]) ** t,
+			action=torch.tensor([-1.]).unsqueeze(0) ** t,
 			reward=torch.tensor([1.]) * t,
 		), batch_size=(1,)) for t in range(cfg.episode_length)]
 	episode0 = torch.cat(transitions0)
 
 	transitions1 = [TensorDict(dict(
 			obs=torch.tensor([20., 21., 22., 23., 24.]).unsqueeze(0) + t,
-			action=(torch.tensor([-1.]) ** t) * 0.5,
+			action=(torch.tensor([-1.]) ** t).unsqueeze(0) * 0.5,
 			reward=torch.tensor([-1.]) * t,
 		), batch_size=(1,)) for t in range(cfg.episode_length)]
 	episode1 = torch.cat(transitions1)

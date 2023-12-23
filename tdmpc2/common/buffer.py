@@ -48,6 +48,7 @@ class Buffer():
 
 	def _init(self, tds):
 		"""Initialize the replay buffer. Use the first episode to estimate storage requirements."""
+		print('Buffer capacity:', self._capacity)
 		mem_free, _ = torch.cuda.mem_get_info()
 		bytes_per_ep = sum([
 				(v.numel()*v.element_size() if not isinstance(v, TensorDict) \
@@ -81,9 +82,18 @@ class Buffer():
 		task = td['task'][0] if 'task' in td.keys() else None
 		return self._to_device(obs, action, reward, task)
 
+	def _add(self, td):
+		"""Internal function that adds episode to the buffer."""
+		pass
+
 	def add(self, td):
 		"""Add an episode to the buffer."""
-		pass
+		td['episode'] = torch.ones_like(td['reward'], dtype=torch.int64) * self._num_eps
+		if self._num_eps == 0:
+			self._buffer = self._init(td)
+		self._add(td)
+		self._num_eps += 1
+		return self._num_eps
 
 	def sample(self):
 		"""Sample a batch of sub-trajectories from the buffer."""
@@ -103,13 +113,9 @@ class CropBuffer(Buffer):
 		self._transform = RandomCropTensorDict(cfg.horizon+1, -1)
 		self._batch_size = cfg.batch_size
 	
-	def add(self, td):
-		"""Add an episode to the buffer. All episodes are expected to be equal length."""
-		if self._num_eps == 0:
-			self._buffer = self._init(td)
+	def _add(self, td):
+		"""Add an episode to the buffer, with trajectories as the leading dimension."""
 		self._buffer.add(td)
-		self._num_eps += 1
-		return self._num_eps
 
 	def sample(self):
 		"""Sample a batch of subsequences from the buffer."""
@@ -134,14 +140,9 @@ class SliceBuffer(Buffer):
 		)
 		self._batch_size = cfg.batch_size * (cfg.horizon+1)
 	
-	def add(self, td):
-		"""Add an episode to the buffer. Supports variable episode lengths."""
-		td['episode'] = torch.ones_like(td['reward'], dtype=torch.int64) * self._num_eps
-		if self._num_eps == 0:
-			self._buffer = self._init(td)
+	def _add(self, td):
+		"""Add an episode to the buffer, with transitions as the leading dimension."""
 		self._buffer.extend(td)
-		self._num_eps += 1
-		return self._num_eps
 
 	def sample(self):
 		"""Sample a batch of subsequences from the buffer."""
