@@ -51,8 +51,7 @@ def train(cfg: dict):
 		cfg=cfg,
 		env=make_env(cfg),
 		agent=TDMPC2(cfg),
-		buffer=CropBuffer(cfg),
-		# buffer=SliceBuffer(cfg),
+		buffer=SliceBuffer(cfg),
 		logger=Logger(cfg),
 	)
 	trainer.train()
