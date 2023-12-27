@@ -10,7 +10,7 @@ from termcolor import colored
 
 from common.parser import parse_cfg
 from common.seed import set_seed
-from common.buffer import CropBuffer, SliceBuffer
+from common.buffer import Buffer
 from envs import make_env
 from tdmpc2 import TDMPC2
 from trainer.offline_trainer import OfflineTrainer
@@ -51,7 +51,7 @@ def train(cfg: dict):
 		cfg=cfg,
 		env=make_env(cfg),
 		agent=TDMPC2(cfg),
-		buffer=SliceBuffer(cfg),
+		buffer=Buffer(cfg),
 		logger=Logger(cfg),
 	)
 	trainer.train()

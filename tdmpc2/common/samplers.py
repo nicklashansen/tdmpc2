@@ -1,36 +1,18 @@
 from __future__ import annotations
 
-import json
-import warnings
-from abc import ABC, abstractmethod
-from copy import copy, deepcopy
-from multiprocessing.context import get_spawning_popen
-from pathlib import Path
-from typing import Any, Dict, Tuple, Union
+from copy import copy
+from typing import Tuple
 
-import numpy as np
 import torch
 
-from tensordict import MemoryMappedTensor
 from tensordict.utils import NestedKey
 
-from torchrl._extension import EXTENSION_WARNING
-
-try:
-    from torchrl._torchrl import (
-        MinSegmentTreeFp32,
-        MinSegmentTreeFp64,
-        SumSegmentTreeFp32,
-        SumSegmentTreeFp64,
-    )
-except ImportError:
-    warnings.warn(EXTENSION_WARNING)
-
 from torchrl.data.replay_buffers.storages import Storage, TensorStorage
-from torchrl.data.replay_buffers.utils import _to_numpy, INT_CLASSES
 from torchrl.data.replay_buffers.samplers import Sampler
 
-_EMPTY_STORAGE_ERROR = "Cannot sample from an empty storage."
+
+# Source: https://pytorch.org/rl/reference/generated/torchrl.data.replay_buffers.SliceSampler.html
+# This copy will live here until it has been included in a few torchrl stable releases
 
 
 class SliceSampler(Sampler):
