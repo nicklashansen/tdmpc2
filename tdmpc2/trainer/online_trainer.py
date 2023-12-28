@@ -54,7 +54,7 @@ class OnlineTrainer(Trainer):
 		else:
 			obs = obs.unsqueeze(0).cpu()
 		if action is None:
-			action = torch.empty_like(self.env.rand_act())
+			action = torch.full_like(self.env.rand_act(), float('nan'))
 		if reward is None:
 			reward = torch.tensor(float('nan'))
 		td = TensorDict(dict(

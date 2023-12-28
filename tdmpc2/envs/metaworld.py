@@ -1,7 +1,6 @@
 import numpy as np
 import gym
 from envs.wrappers.time_limit import TimeLimit
-from envs.exceptions import UnknownTaskError
 
 from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
@@ -44,7 +43,8 @@ def make_env(cfg):
 	"""
 	env_id = cfg.task.split("-", 1)[-1] + "-v2-goal-observable"
 	if not cfg.task.startswith('mw-') or env_id not in ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE:
-		raise UnknownTaskError(cfg.task)
+		raise ValueError('Unknown task:', cfg.task)
+	assert cfg.obs == 'state', 'This task only supports state observations.'
 	env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[env_id](seed=cfg.seed)
 	env = MetaWorldWrapper(env, cfg)
 	env = TimeLimit(env, max_episode_steps=100)

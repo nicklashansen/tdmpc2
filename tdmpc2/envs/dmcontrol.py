@@ -8,7 +8,6 @@ suite.ALL_TASKS = suite.ALL_TASKS + suite._get_tasks('custom')
 suite.TASKS_BY_DOMAIN = suite._get_tasks_by_domain(suite.ALL_TASKS)
 from dm_control.suite.wrappers import action_scale
 from dm_env import StepType, specs
-from envs.exceptions import UnknownTaskError
 import gym
 
 
@@ -187,7 +186,8 @@ def make_env(cfg):
 	domain, task = cfg.task.replace('-', '_').split('_', 1)
 	domain = dict(cup='ball_in_cup', pointmass='point_mass').get(domain, domain)
 	if (domain, task) not in suite.ALL_TASKS:
-		raise UnknownTaskError(cfg.task)
+		raise ValueError('Unknown task:', task)
+	assert cfg.obs in {'state', 'rgb'}, 'This task only supports state and rgb observations.'
 	env = suite.load(domain,
 					 task,
 					 task_kwargs={'random': cfg.seed},
