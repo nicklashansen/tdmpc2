@@ -18,7 +18,7 @@ TD-MPC**2** is a scalable, robust model-based reinforcement learning algorithm. 
 
 <img src="assets/8.png" width="100%" style="max-width: 640px"><br/>
 
-This repository contains code for training and evaluating both single-task online RL and multi-task offline RL TD-MPC**2** agents. We additionally open-source **300+** [model checkpoints](https://nicklashansen.github.io/td-mpc2/models) (including 12 multi-task models) across 4 task domains: [DMControl](https://arxiv.org/abs/1801.00690), [Meta-World](https://meta-world.github.io/), [ManiSkill2](https://maniskill2.github.io/), and [MyoSuite](https://sites.google.com/view/myosuite), as well as our [30-task and 80-task datasets](https://nicklashansen.github.io/td-mpc2/dataset) used to train the multi-task models. We hope that this repository will serve as a useful community resource for future research on model-based RL.
+This repository contains code for training and evaluating both single-task online RL and multi-task offline RL TD-MPC**2** agents. We additionally open-source **300+** [model checkpoints](https://nicklashansen.github.io/td-mpc2/models) (including 12 multi-task models) across 4 task domains: [DMControl](https://arxiv.org/abs/1801.00690), [Meta-World](https://meta-world.github.io/), [ManiSkill2](https://maniskill2.github.io/), and [MyoSuite](https://sites.google.com/view/myosuite), as well as our [30-task and 80-task datasets](https://nicklashansen.github.io/td-mpc2/dataset) used to train the multi-task models. Our codebase supports both state and pixel observations. We hope that this repository will serve as a useful community resource for future research on model-based RL.
 
 ----
 
@@ -32,11 +32,14 @@ We provide a `Dockerfile` for easy installation. You can build the docker image 
 cd docker && docker build . -t <user>/tdmpc2:0.1.0
 ```
 
-If you prefer to install dependencies manually, start by installing dependencies via `conda` by running
+If you prefer to install dependencies manually, start by installing dependencies via `conda` by running one of the following commands:
 
 ```
 conda env create -f docker/environment.yaml
+conda env create -f docker/environment_minimal.yaml
 ```
+
+The `environment.yaml` file installs dependencies required for all environments, whereas `environment_minimal.yaml` only installs dependencies for training on DMControl tasks.
 
 If you want to run ManiSkill2, you will additionally need to download and link the necessary assets by running
 
@@ -72,10 +75,12 @@ This codebase currently supports **104** continuous control tasks from **DMContr
 | metaworld | mw-pick-place-wall
 | maniskill | pick-cube
 | maniskill | pick-ycb
-| myosuite  | myo-hand-key-turn
-| myosuite  | myo-hand-key-turn-hard
+| myosuite  | myo-key-turn
+| myosuite  | myo-key-turn-hard
 
 which can be run by specifying the `task` argument for `evaluation.py`. Multi-task training and evaluation is specified by setting `task=mt80` or `task=mt30` for the 80-task and 30-task sets, respectively.
+
+**As of Dec 27, 2023 the TD-MPC2 codebase also supports pixel observations for DMControl tasks**; use argument `obs=rgb` if you wish to train visual policies.
 
 
 ## Example usage
@@ -102,6 +107,7 @@ See below examples on how to train TD-MPC**2** on a single task (online RL) and 
 $ python train.py task=mt80 model_size=48 batch_size=1024
 $ python train.py task=mt30 model_size=317 batch_size=1024
 $ python train.py task=dog-run steps=7000000
+$ python train.py task=walker-walk obs=rgb
 ```
 
 We recommend using default hyperparameters for single-task online RL, including the default model size of 5M parameters (`model_size=5`). Multi-task offline RL benefits from a larger model size, but larger models are also increasingly costly to train and evaluate. Available arguments are `model_size={1, 5, 19, 48, 317}`. See `config.yaml` for a full list of arguments.

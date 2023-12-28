@@ -1,7 +1,6 @@
 import gym
 import numpy as np
 from envs.wrappers.time_limit import TimeLimit
-from envs.exceptions import UnknownTaskError
 
 import mani_skill2.envs
 
@@ -65,7 +64,8 @@ def make_env(cfg):
 	Make ManiSkill2 environment.
 	"""
 	if cfg.task not in MANISKILL_TASKS:
-		raise UnknownTaskError(cfg.task)
+		raise ValueError('Unknown task:', cfg.task)
+	assert cfg.obs == 'state', 'This task only supports state observations.'
 	task_cfg = MANISKILL_TASKS[cfg.task]
 	env = gym.make(
 		task_cfg['env'],
