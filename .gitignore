@@ -1,7 +1,11 @@
-# logging
+# Logging
 tdmpc2/logs/
 tdmpc2/outputs/
 tdmpc2/wandb/
+
+# HPC
+nautilus/*.yaml
+*.key
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
