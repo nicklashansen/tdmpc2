@@ -38,6 +38,7 @@ horizon: 3
 min_std: 0.05
 max_std: 2
 temperature: 0.5
+uncertainty_coef: 0
 
 # actor
 log_std_min: -10
