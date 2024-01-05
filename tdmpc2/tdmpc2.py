@@ -91,6 +91,8 @@ class TDMPC2:
 	@torch.no_grad()
 	def _estimate_uncertainty(self, z, task):
 		"""Estimates epistemic uncertainty, normalized by predicted value."""
+		if self.cfg.uncertainty_coef == 0:
+			return 0
 		qs = math.two_hot_inv(self.model.Q(z, self.model.pi(z, task)[1], task, return_type='all'), self.cfg)
 		return qs.mean() * qs.std(0) * self.cfg.uncertainty_coef
 
