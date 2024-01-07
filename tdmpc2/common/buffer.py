@@ -12,7 +12,7 @@ class Buffer():
 
 	def __init__(self, cfg):
 		self.cfg = cfg
-		self._device = torch.device('cuda')
+		self._device = torch.device(self.cfg.rank)
 		self._capacity = min(cfg.buffer_size, cfg.steps)
 		self._sampler = SliceSampler(
 			num_slices=self.cfg.batch_size,
@@ -22,6 +22,7 @@ class Buffer():
 		)
 		self._batch_size = cfg.batch_size * (cfg.horizon+1)
 		self._num_eps = 0
+		self._num_transitions = 0
 
 	@property
 	def capacity(self):
@@ -32,6 +33,11 @@ class Buffer():
 	def num_eps(self):
 		"""Return the number of episodes in the buffer."""
 		return self._num_eps
+	
+	@property
+	def num_transitions(self):
+		"""Return the number of transitions in the buffer."""
+		return self._num_transitions
 
 	def _reserve_buffer(self, storage):
 		"""
@@ -47,7 +53,11 @@ class Buffer():
 
 	def _init(self, tds):
 		"""Initialize the replay buffer. Use the first episode to estimate storage requirements."""
-		print(f'Buffer capacity: {self._capacity:,}')
+		if self.cfg.rank == 0:
+			if self.cfg.world_size > 1:
+				print(f'Buffer capacity per process: {self._capacity:,}')
+			else:
+				print(f'Buffer capacity: {self._capacity:,}')
 		mem_free, _ = torch.cuda.mem_get_info()
 		bytes_per_step = sum([
 				(v.numel()*v.element_size() if not isinstance(v, TensorDict) \
@@ -55,10 +65,15 @@ class Buffer():
 			for v in tds.values()
 		]) / len(tds)
 		total_bytes = bytes_per_step*self._capacity
-		print(f'Storage required: {total_bytes/1e9:.2f} GB')
+		if self.cfg.rank == 0:
+			if self.cfg.world_size > 1:
+				print(f'Storage required per process: {total_bytes/1e9:.2f} GB')
+			else:
+				print(f'Storage required: {total_bytes/1e9:.2f} GB')
 		# Heuristic: decide whether to use CUDA or CPU memory
-		storage_device = 'cuda' if 2.5*total_bytes < mem_free else 'cpu'
-		print(f'Using {storage_device.upper()} memory for storage.')
+		storage_device = self.cfg.rank if 2.5*total_bytes < mem_free else 'cpu'
+		if self.cfg.rank == 0:
+			print(f'Using {storage_device.upper()} memory for storage.')
 		return self._reserve_buffer(
 			LazyTensorStorage(self._capacity, device=torch.device(storage_device))
 		)
@@ -87,6 +102,7 @@ class Buffer():
 			self._buffer = self._init(td)
 		self._buffer.extend(td)
 		self._num_eps += 1
+		self._num_transitions += len(td)
 		return self._num_eps
 
 	def sample(self):

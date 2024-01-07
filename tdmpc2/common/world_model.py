@@ -3,13 +3,15 @@ from copy import deepcopy
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn.parallel import DistributedDataParallel as DDP
+from tensordict.tensordict import TensorDict
 
 from common import layers, math, init
 
 
 class WorldModel(nn.Module):
 	"""
-	TD-MPC2 implicit world model architecture.
+	Distributed version of the TD-MPC2 world model architecture.
 	Can be used for both single-task and multi-task experiments.
 	"""
 
@@ -17,24 +19,36 @@ class WorldModel(nn.Module):
 		super().__init__()
 		self.cfg = cfg
 		if cfg.multitask:
-			self._task_emb = nn.Embedding(len(cfg.tasks), cfg.task_dim, max_norm=1)
+			self.__task_emb = nn.Embedding(len(cfg.tasks), cfg.task_dim, max_norm=1)
 			self._action_masks = torch.zeros(len(cfg.tasks), cfg.action_dim)
 			for i in range(len(cfg.tasks)):
 				self._action_masks[i, :cfg.action_dims[i]] = 1.
-		self._encoder = layers.enc(cfg)
-		self._dynamics = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], cfg.latent_dim, act=layers.SimNorm(cfg))
-		self._reward = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1))
-		self._pi = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 2*cfg.action_dim)
-		self._Qs = layers.Ensemble([layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1), dropout=cfg.dropout) for _ in range(cfg.num_q)])
+		self.__encoder = layers.enc(cfg)
+		self.__dynamics = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], cfg.latent_dim, act=layers.SimNorm(cfg))
+		self.__reward = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1))
+		self.__pi = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 2*cfg.action_dim)
+		self.__Qs = layers.Ensemble([layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1), dropout=cfg.dropout) for _ in range(cfg.num_q)])
 		self.apply(init.weight_init)
-		init.zero_([self._reward[-1].weight, self._Qs.params[-2]])
-		self._target_Qs = deepcopy(self._Qs).requires_grad_(False)
-		self.log_std_min = torch.tensor(cfg.log_std_min)
-		self.log_std_dif = torch.tensor(cfg.log_std_max) - self.log_std_min
+		init.zero_([self.__reward[-1].weight, self.__Qs.params[-2]])
+		self._target_Qs = deepcopy(self.__Qs).requires_grad_(False)
+		self.log_std_min = torch.tensor(cfg.log_std_min, requires_grad=False)
+		self.log_std_dif = torch.tensor(cfg.log_std_max, requires_grad=False) - self.log_std_min
+		self.to(cfg.rank)
+		if cfg.multitask:
+			self._task_emb = DDP(self.__task_emb, device_ids=[cfg.rank])
+		self._encoder = nn.ModuleDict({k: DDP(v, device_ids=[cfg.rank]) for k, v in self.__encoder.items()})
+		self._dynamics = DDP(self.__dynamics, device_ids=[cfg.rank])
+		self._reward = DDP(self.__reward, device_ids=[cfg.rank])
+		self._pi = DDP(self.__pi, device_ids=[cfg.rank])
+		self._Qs = DDP(self.__Qs, device_ids=[cfg.rank])
 
 	@property
 	def total_params(self):
 		return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+	def __repr__(self):
+		modules = '\n'.join([str(m) for m in [self._encoder, self._dynamics, self._reward, self._pi, self._Qs]])
+		return f"{self.__class__.__name__}({modules})\nLearnable parameters: {self.total_params:,}"
 		
 	def to(self, *args, **kwargs):
 		"""

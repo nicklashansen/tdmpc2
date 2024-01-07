@@ -16,8 +16,8 @@ class TDMPC2:
 
 	def __init__(self, cfg):
 		self.cfg = cfg
-		self.device = torch.device('cuda')
-		self.model = WorldModel(cfg).to(self.device)
+		self.device = torch.device(cfg.rank)
+		self.model = WorldModel(cfg)
 		self.optim = torch.optim.Adam([
 			{'params': self.model._encoder.parameters(), 'lr': self.cfg.lr*self.cfg.enc_lr_scale},
 			{'params': self.model._dynamics.parameters()},
@@ -30,7 +30,7 @@ class TDMPC2:
 		self.scale = RunningScale(cfg)
 		self.cfg.iterations += 2*int(cfg.action_dim >= 20) # Heuristic for large action spaces
 		self.discount = torch.tensor(
-			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='cuda'
+			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device=cfg.rank
 		) if self.cfg.multitask else self._get_discount(cfg.episode_length)
 
 	def _get_discount(self, episode_length):

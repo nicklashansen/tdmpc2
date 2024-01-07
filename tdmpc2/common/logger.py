@@ -113,11 +113,13 @@ class Logger:
 		self._group = cfg_to_group(cfg)
 		self._seed = cfg.seed
 		self._eval = []
-		print_run(cfg)
+		if cfg.rank == 0:
+			print_run(cfg)
 		self.project = cfg.get("wandb_project", "none")
 		self.entity = cfg.get("wandb_entity", "none")
-		if cfg.disable_wandb or self.project == "none" or self.entity == "none":
-			print(colored("Wandb disabled.", "blue", attrs=["bold"]))
+		if cfg.rank == 0 or cfg.disable_wandb or self.project == "none" or self.entity == "none":
+			if cfg.rank == 0:
+				print(colored("Wandb disabled.", "blue", attrs=["bold"]))
 			cfg.save_agent = False
 			cfg.save_video = False
 			self._wandb = None

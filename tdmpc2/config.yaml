@@ -11,6 +11,7 @@ eval_episodes: 10
 eval_freq: 50000
 
 # training
+world_size: 1
 steps: 10_000_000
 batch_size: 256
 reward_coef: 0.1
@@ -74,6 +75,7 @@ save_agent: true
 seed: 1
 
 # convenience
+rank: ???
 work_dir: ???
 task_title: ???
 multitask: ???
