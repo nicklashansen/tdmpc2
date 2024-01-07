@@ -14,14 +14,28 @@ from common.buffer import Buffer
 from envs import make_env
 from tdmpc2 import TDMPC2
 from trainer.offline_trainer import OfflineTrainer
-from trainer.online_trainer import OnlineTrainer
 from common.logger import Logger
 
 torch.backends.cudnn.benchmark = True
 
 
-@hydra.main(config_name='config', config_path='.')
-def train(cfg: dict):
+def setup(rank, world_size):
+	os.environ["MASTER_ADDR"] = "localhost"
+	os.environ["MASTER_PORT"] = "12355"
+
+	# initialize the process group
+	torch.distributed.init_process_group(
+		backend="nccl",
+		rank=rank,
+		world_size=world_size
+	)
+
+
+def cleanup():
+	torch.distributed.destroy_process_group()
+
+
+def train(rank: int, cfg: dict):
 	"""
 	Script for training single-task / multi-task TD-MPC2 agents.
 
@@ -40,14 +54,11 @@ def train(cfg: dict):
 		$ python train.py task=dog-run steps=7000000
 	```
 	"""
-	assert torch.cuda.is_available()
-	assert cfg.steps > 0, 'Must train for at least 1 step.'
-	cfg = parse_cfg(cfg)
-	set_seed(cfg.seed)
-	print(colored('Work dir:', 'yellow', attrs=['bold']), cfg.work_dir)
+	setup(rank, cfg.world_size)
+	set_seed(cfg.seed + rank)
+	cfg.rank = rank
 
-	trainer_cls = OfflineTrainer if cfg.multitask else OnlineTrainer
-	trainer = trainer_cls(
+	trainer = OfflineTrainer(
 		cfg=cfg,
 		env=make_env(cfg),
 		agent=TDMPC2(cfg),
@@ -55,8 +66,26 @@ def train(cfg: dict):
 		logger=Logger(cfg),
 	)
 	trainer.train()
-	print('\nTraining completed successfully')
+	if cfg.rank == 0:
+		print('\nTraining completed successfully')
+	cleanup()
+
+
+@hydra.main(config_name='config', config_path='.')
+def launch(cfg: dict):
+	assert torch.cuda.is_available()
+	assert cfg.world_size > 0, 'Must train with at least 1 GPU.'
+	assert cfg.task in {'mt30', 'mt80'}, 'Distributed training is only supported for multi-task experiments.'
+	assert cfg.steps > 0, 'Must train for at least 1 step.'
+	cfg = parse_cfg(cfg)
+	print(colored('Work dir:', 'yellow', attrs=['bold']), cfg.work_dir)
+	torch.multiprocessing.spawn(
+		train,
+		args=(cfg,),
+		nprocs=cfg.world_size,
+		join=True,
+	)
 
 
 if __name__ == '__main__':
-	train()
+	launch()

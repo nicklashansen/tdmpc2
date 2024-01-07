@@ -50,12 +50,21 @@ class OfflineTrainer(Trainer):
 		fp = Path(os.path.join(self.cfg.data_dir, '*.pt'))
 		fps = sorted(glob(str(fp)))
 		assert len(fps) > 0, f'No data found at {fp}'
-		print(f'Found {len(fps)} files in {fp}')
-	
+		if self.cfg.rank == 0:
+			print(f'Found {len(fps)} files in {fp}')
+
+		# Distribute data across processes
+		assert len(fps) >= self.cfg.world_size, \
+			f'World size {self.cfg.world_size} cannot be greater than number of data chunks {len(fps)}'
+		fps = fps[self.cfg.rank::self.cfg.world_size]
+		print(f'Process {self.cfg.rank} has {len(fps)} files')
+		assert len(fps) > 0, f'No data assigned to process {self.cfg.rank}'
+
 		# Create buffer for sampling
 		_cfg = deepcopy(self.cfg)
 		_cfg.episode_length = 101 if self.cfg.task == 'mt80' else 501
 		_cfg.buffer_size = 550_450_000 if self.cfg.task == 'mt80' else 345_690_000
+		_cfg.buffer_size //= self.cfg.world_size
 		_cfg.steps = _cfg.buffer_size
 		self.buffer = Buffer(_cfg)
 		for fp in tqdm(fps, desc='Loading data'):
@@ -65,10 +74,12 @@ class OfflineTrainer(Trainer):
 				f'please double-check your config.'
 			for i in range(len(td)):
 				self.buffer.add(td[i])
-		assert self.buffer.num_eps == self.buffer.capacity, \
-			f'Buffer has {self.buffer.num_eps} episodes, expected {self.buffer.capacity} episodes.'
+		if self.buffer.num_transitions > self.buffer.capacity:
+			print(f'Buffer has {self.buffer.num_transitions} transitions,' \
+		 		f'expected maximum {self.buffer.capacity} transitions in process {self.cfg.rank}.')
 		
-		print(f'Training agent for {self.cfg.steps} iterations...')
+		if self.cfg.rank == 0:
+			print(f'Training agent for {self.cfg.steps} iterations...')
 		metrics = {}
 		for i in range(self.cfg.steps):
 
@@ -76,7 +87,7 @@ class OfflineTrainer(Trainer):
 			train_metrics = self.agent.update(self.buffer)
 
 			# Evaluate agent periodically
-			if i % self.cfg.eval_freq == 0 or i % 10_000 == 0:
+			if self.cfg.rank == 0 and (i % self.cfg.eval_freq == 0 or i % 10_000 == 0):
 				metrics = {
 					'iteration': i,
 					'total_time': time() - self._start_time,
@@ -89,4 +100,5 @@ class OfflineTrainer(Trainer):
 						self.logger.save_agent(self.agent, identifier=f'{i}')
 				self.logger.log(metrics, 'pretrain')
 			
-		self.logger.finish(self.agent)
+		if self.cfg.rank == 0:
+			self.logger.finish(self.agent)
