@@ -35,7 +35,8 @@ def make_multitask_env(cfg):
 	"""
 	Make a multi-task environment for TD-MPC2 experiments.
 	"""
-	print('Creating multi-task environment with tasks:', cfg.tasks)
+	if cfg.rank == 0:
+		print('Creating multi-task environment with tasks:', cfg.tasks)
 	envs = []
 	for task in cfg.tasks:
 		_cfg = deepcopy(cfg)
