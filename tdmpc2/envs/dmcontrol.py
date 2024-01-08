@@ -10,6 +10,8 @@ from dm_control.suite.wrappers import action_scale
 from dm_env import StepType, specs
 import gym
 
+from envs.wrappers.episodic import EpisodicWrapper
+
 
 class ExtendedTimeStep(NamedTuple):
 	step_type: Any
@@ -197,4 +199,6 @@ def make_env(cfg):
 	env = action_scale.Wrapper(env, minimum=-1., maximum=1.)
 	env = ExtendedTimeStepWrapper(env)
 	env = TimeStepToGymWrapper(env, domain, task)
+	if cfg.episodic:
+		env = EpisodicWrapper(cfg, env)
 	return env

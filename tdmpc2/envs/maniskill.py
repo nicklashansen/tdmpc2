@@ -47,12 +47,9 @@ class ManiSkillWrapper(gym.Wrapper):
 	def step(self, action):
 		reward = 0
 		for _ in range(2):
-			obs, r, done, info = self.env.step(action)
+			obs, r, _, info = self.env.step(action)
 			reward += r
-			info['terminated'] = done
-			if done:
-				break
-		return obs, reward, done, info
+		return obs, reward, False, info
 
 	@property
 	def unwrapped(self):

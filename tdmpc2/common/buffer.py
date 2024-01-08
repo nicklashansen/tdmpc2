@@ -78,7 +78,7 @@ class Buffer():
 		obs = td['obs']
 		action = td['action'][1:]
 		reward = td['reward'][1:].unsqueeze(-1)
-		terminated = td['terminated'][1:].unsqueeze(-1)
+		terminated = td['terminated'][-1].unsqueeze(-1)
 		task = td['task'][0] if 'task' in td.keys() else None
 		return self._to_device(obs, action, reward, terminated, task)
 
