@@ -24,6 +24,7 @@ class WorldModel(nn.Module):
 		self._encoder = layers.enc(cfg)
 		self._dynamics = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], cfg.latent_dim, act=layers.SimNorm(cfg))
 		self._reward = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1))
+		self._terminated = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 1)
 		self._pi = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 2*cfg.action_dim)
 		self._Qs = layers.Ensemble([layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1), dropout=cfg.dropout) for _ in range(cfg.num_q)])
 		self.apply(init.weight_init)
@@ -118,6 +119,15 @@ class WorldModel(nn.Module):
 			z = self.task_emb(z, task)
 		z = torch.cat([z, a], dim=-1)
 		return self._reward(z)
+	
+	def terminated(self, z, task):
+		"""
+		Predicts termination signal.
+		"""
+		assert task is None
+		if self.cfg.multitask:
+			z = self.task_emb(z, task)
+		return torch.sigmoid(self._terminated(z))
 
 	def pi(self, z, task):
 		"""

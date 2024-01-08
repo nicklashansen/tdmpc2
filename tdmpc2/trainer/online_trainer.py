@@ -47,8 +47,10 @@ class OnlineTrainer(Trainer):
 			episode_success=np.nanmean(ep_successes),
 		)
 
-	def to_td(self, obs, action=None, reward=None):
+	def to_td(self, obs=None, action=None, reward=None, terminated=None):
 		"""Creates a TensorDict for a new episode."""
+		if obs is None:
+			obs = torch.full((*self.cfg.obs_shape[self.cfg.obs],), float('nan'))
 		if isinstance(obs, dict):
 			obs = TensorDict(obs, batch_size=(), device='cpu')
 		else:
@@ -57,12 +59,15 @@ class OnlineTrainer(Trainer):
 			action = torch.full_like(self.env.rand_act(), float('nan'))
 		if reward is None:
 			reward = torch.tensor(float('nan'))
+		if terminated is None:
+			terminated = torch.tensor(float('nan'))
 		td = TensorDict(dict(
 			obs=obs,
 			action=action.unsqueeze(0),
 			reward=reward.unsqueeze(0),
+			terminated=terminated.unsqueeze(0),
 		), batch_size=(1,))
-		return td				
+		return td
 
 	def train(self):
 		"""Train a TD-MPC2 agent."""
@@ -88,6 +93,7 @@ class OnlineTrainer(Trainer):
 					)
 					train_metrics.update(self.common_metrics())
 					self.logger.log(train_metrics, 'train')
+					self._tds.append(self.to_td()) # Separate episodes with NaNs
 					self._ep_idx = self.buffer.add(torch.cat(self._tds))
 
 				obs = self.env.reset()
@@ -99,7 +105,7 @@ class OnlineTrainer(Trainer):
 			else:
 				action = self.env.rand_act()
 			obs, reward, done, info = self.env.step(action)
-			self._tds.append(self.to_td(obs, action, reward))
+			self._tds.append(self.to_td(obs, action, reward, info['terminated']))
 
 			# Update agent
 			if self._step >= self.cfg.seed_steps:
