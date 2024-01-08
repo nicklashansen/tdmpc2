@@ -2,8 +2,9 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: dog-run
+task: cartpole-balance-sparse
 obs: state
+episodic: true
 
 # evaluation
 checkpoint: ???

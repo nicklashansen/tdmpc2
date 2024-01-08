@@ -46,6 +46,9 @@ def train(cfg: dict):
 	set_seed(cfg.seed)
 	print(colored('Work dir:', 'yellow', attrs=['bold']), cfg.work_dir)
 
+	assert cfg.task == 'cartpole-balance-sparse' and cfg.episodic, \
+		f'This branch is experimental and only supports cartpole-balance-sparse at this time.'
+
 	trainer_cls = OfflineTrainer if cfg.multitask else OnlineTrainer
 	trainer = trainer_cls(
 		cfg=cfg,

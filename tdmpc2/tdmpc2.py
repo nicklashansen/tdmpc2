@@ -230,7 +230,7 @@ class TDMPC2:
 			dict: Dictionary of training statistics.
 		"""
 		obs, action, reward, terminated, task = buffer.sample()
-	
+		
 		# Compute targets
 		with torch.no_grad():
 			next_z = self.model.encode(obs[1:], task)
@@ -254,15 +254,16 @@ class TDMPC2:
 		_zs = zs[:-1]
 		qs = self.model.Q(_zs, action, task, return_type='all')
 		reward_preds = self.model.reward(_zs, action, task)
-		terminated_preds = self.model.terminated(_zs, task)
-		
+		terminated_pred = self.model.terminated(zs[-1], task)
+
 		# Compute losses
 		reward_loss, terminated_loss, value_loss = 0, 0, 0
 		for t in range(self.cfg.horizon):
 			reward_loss += math.soft_ce(reward_preds[t], reward[t], self.cfg).mean() * self.cfg.rho**t
-			terminated_loss += F.binary_cross_entropy(terminated_preds[t], terminated[t]) * self.cfg.rho**t
+			terminated_loss += F.binary_cross_entropy(terminated_pred[t], terminated[t]) * self.cfg.rho**t
 			for q in range(self.cfg.num_q):
 				value_loss += math.soft_ce(qs[q][t], td_targets[t], self.cfg).mean() * self.cfg.rho**t
+		terminated_loss = F.binary_cross_entropy(terminated_pred, terminated)
 		consistency_loss *= (1/self.cfg.horizon)
 		reward_loss *= (1/self.cfg.horizon)
 		terminated_loss *= (1/self.cfg.horizon)
