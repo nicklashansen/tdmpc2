@@ -47,10 +47,8 @@ class OnlineTrainer(Trainer):
 			episode_success=np.nanmean(ep_successes),
 		)
 
-	def to_td(self, obs=None, action=None, reward=None):
+	def to_td(self, obs, action=None, reward=None):
 		"""Creates a TensorDict for a new episode."""
-		if obs is None:
-			obs = torch.full((*self.cfg.obs_shape[self.cfg.obs],), float('nan'))
 		if isinstance(obs, dict):
 			obs = TensorDict(obs, batch_size=(), device='cpu')
 		else:
@@ -90,7 +88,6 @@ class OnlineTrainer(Trainer):
 					)
 					train_metrics.update(self.common_metrics())
 					self.logger.log(train_metrics, 'train')
-					self._tds.append(self.to_td()) # Separate episodes with NaNs
 					self._ep_idx = self.buffer.add(torch.cat(self._tds))
 
 				obs = self.env.reset()
