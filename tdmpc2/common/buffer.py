@@ -1,8 +1,7 @@
 import torch
 from tensordict.tensordict import TensorDict
 from torchrl.data.replay_buffers import ReplayBuffer, LazyTensorStorage
-
-from common.samplers import SliceSampler
+from torchrl.data.replay_buffers.samplers import SliceSampler
 
 
 class Buffer():
