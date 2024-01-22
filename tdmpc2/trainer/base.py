@@ -7,8 +7,8 @@ class Trainer:
 		self.agent = agent
 		self.buffer = buffer
 		self.logger = logger
-		print("Learnable parameters: {:,}".format(self.agent.model.total_params))
 		print('Architecture:', self.agent.model)
+		print("Learnable parameters: {:,}".format(self.agent.model.total_params))
 
 	def eval(self):
 		"""Evaluate a TD-MPC2 agent."""
