@@ -60,6 +60,7 @@ RUN mkdir -p /root/.mujoco && \
     rm mujoco210-linux-x86_64.tar.gz && \
     mv mujoco210 /root/.mujoco/mujoco210 && \
     mv mjkey.txt /root/.mujoco/mjkey.txt && \
+    find /root/.mujoco -uid 421709 -exec chown root:root {} \; && \
     python -c "import mujoco_py"
 
 # gym
