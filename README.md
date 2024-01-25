@@ -120,16 +120,23 @@ We recommend using default hyperparameters for single-task online RL, including 
 
 ## Citation
 
-If you find our work useful, please consider citing the paper as follows:
+If you find our work useful, please consider citing our paper as follows:
 
 ```
-@misc{hansen2023tdmpc2,
-	title={TD-MPC2: Scalable, Robust World Models for Continuous Control}, 
-	author={Nicklas Hansen and Hao Su and Xiaolong Wang},
-	year={2023},
-	eprint={2310.16828},
-	archivePrefix={arXiv},
-	primaryClass={cs.LG}
+@inproceedings{hansen2024tdmpc2,
+  title={TD-MPC2: Scalable, Robust World Models for Continuous Control}, 
+  author={Nicklas Hansen and Hao Su and Xiaolong Wang},
+  booktitle={International Conference on Learning Representations (ICLR)},
+  year={2024}
+}
+```
+as well as the original TD-MPC paper:
+```
+@inproceedings{hansen2022tdmpc,
+  title={Temporal Difference Learning for Model Predictive Control},
+  author={Nicklas Hansen and Xiaolong Wang and Hao Su},
+  booktitle={International Conference on Machine Learning (ICML)},
+  year={2022}
 }
 ```
 
