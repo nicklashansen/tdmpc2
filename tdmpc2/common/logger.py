@@ -227,8 +227,10 @@ class Logger:
 				xkey = "step"
 			elif category == "pretrain":
 				xkey = "iteration"
+			_d = dict()
 			for k, v in d.items():
-				self._wandb.log({category + "/" + k: v}, step=d[xkey])
+				_d[category + "/" + k] = v
+			self._wandb.log(_d, step=d[xkey])
 		if category == "eval" and self._save_csv:
 			keys = ["step", "episode_reward"]
 			self._eval.append(np.array([d[keys[0]], d[keys[1]]]))
