@@ -81,11 +81,13 @@ class Buffer():
 
 	def add(self, td):
 		"""Add an episode to the buffer."""
-		td['episode'] = torch.full_like(td['reward'], self._num_eps, dtype=torch.int64)
+		td['episode'] = torch.ones_like(td['reward'], dtype=torch.int64) * torch.arange(self._num_eps, self._num_eps+self.cfg.num_envs)
+		td = td.permute(1, 0)
 		if self._num_eps == 0:
-			self._buffer = self._init(td)
-		self._buffer.extend(td)
-		self._num_eps += 1
+			self._buffer = self._init(td[0])
+		for i in range(self.cfg.num_envs):
+			self._buffer.extend(td[i])
+		self._num_eps += self.cfg.num_envs
 		return self._num_eps
 
 	def sample(self):

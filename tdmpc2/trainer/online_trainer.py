@@ -1,6 +1,5 @@
 from time import time
 
-import numpy as np
 import torch
 from tensordict.tensordict import TensorDict
 from trainer.base import Trainer
@@ -25,12 +24,12 @@ class OnlineTrainer(Trainer):
 
 	def eval(self):
 		"""Evaluate a TD-MPC2 agent."""
-		ep_rewards, ep_successes = [], []
-		for i in range(self.cfg.eval_episodes):
-			obs, done, ep_reward, t = self.env.reset(), False, 0, 0
+		ep_rewards = []
+		for i in range(self.cfg.eval_episodes // self.cfg.num_envs):
+			obs, done, ep_reward, t = self.env.reset(), torch.tensor(False), 0, 0
 			if self.cfg.save_video:
 				self.logger.video.init(self.env, enabled=(i==0))
-			while not done:
+			while not done.any():
 				torch.compiler.cudagraph_mark_step_begin()
 				action = self.agent.act(obs, t0=t==0, eval_mode=True)
 				obs, reward, done, info = self.env.step(action)
@@ -38,13 +37,13 @@ class OnlineTrainer(Trainer):
 				t += 1
 				if self.cfg.save_video:
 					self.logger.video.record(self.env)
+			assert done.all(), 'Vectorized environments must reset all environments at once.'
 			ep_rewards.append(ep_reward)
-			ep_successes.append(info['success'])
 			if self.cfg.save_video:
 				self.logger.video.save(self._step)
 		return dict(
-			episode_reward=np.nanmean(ep_rewards),
-			episode_success=np.nanmean(ep_successes),
+			episode_reward=torch.cat(ep_rewards).mean(),
+			episode_success=info['success'].mean(),
 		)
 
 	def to_td(self, obs, action=None, reward=None):
@@ -56,24 +55,25 @@ class OnlineTrainer(Trainer):
 		if action is None:
 			action = torch.full_like(self.env.rand_act(), float('nan'))
 		if reward is None:
-			reward = torch.tensor(float('nan'))
-		td = TensorDict(
+			reward = torch.tensor(float('nan')).repeat(self.cfg.num_envs)
+		td = TensorDict(dict(
 			obs=obs,
 			action=action.unsqueeze(0),
 			reward=reward.unsqueeze(0),
-		batch_size=(1,))
+		), batch_size=(1, self.cfg.num_envs,))
 		return td
 
 	def train(self):
 		"""Train a TD-MPC2 agent."""
-		train_metrics, done, eval_next = {}, True, False
+		train_metrics, done, eval_next = {}, torch.tensor(True), True
 		while self._step <= self.cfg.steps:
 			# Evaluate agent periodically
 			if self._step % self.cfg.eval_freq == 0:
 				eval_next = True
 
 			# Reset environment
-			if done:
+			if done.any():
+				assert done.all(), 'Vectorized environments must reset all environments at once.'
 				if eval_next:
 					eval_metrics = self.eval()
 					eval_metrics.update(self.common_metrics())
@@ -81,13 +81,14 @@ class OnlineTrainer(Trainer):
 					eval_next = False
 
 				if self._step > 0:
+					tds = torch.cat(self._tds)
 					train_metrics.update(
-						episode_reward=torch.tensor([td['reward'] for td in self._tds[1:]]).sum(),
-						episode_success=info['success'],
+						episode_reward=tds['reward'].nansum(0).mean(),
+						episode_success=info['success'].nanmean(),
 					)
 					train_metrics.update(self.common_metrics())
 					self.logger.log(train_metrics, 'train')
-					self._ep_idx = self.buffer.add(torch.cat(self._tds))
+					self._ep_idx = self.buffer.add(tds)
 
 				obs = self.env.reset()
 				self._tds = [self.to_td(obs)]
@@ -103,14 +104,14 @@ class OnlineTrainer(Trainer):
 			# Update agent
 			if self._step >= self.cfg.seed_steps:
 				if self._step == self.cfg.seed_steps:
-					num_updates = self.cfg.seed_steps
+					num_updates = int(self.cfg.seed_steps / self.cfg.steps_per_update)
 					print('Pretraining agent on seed data...')
 				else:
-					num_updates = 1
+					num_updates = max(1, int(self.cfg.num_envs / self.cfg.steps_per_update))
 				for _ in range(num_updates):
 					_train_metrics = self.agent.update(self.buffer)
 				train_metrics.update(_train_metrics)
 
-			self._step += 1
-
+			self._step += self.cfg.num_envs
+	
 		self.logger.finish(self.agent)

@@ -4,6 +4,7 @@ defaults:
 # environment
 task: dog-run
 obs: state
+num_envs: 1
 
 # evaluation
 checkpoint: ???
@@ -13,6 +14,7 @@ eval_freq: 50000
 # training
 steps: 10_000_000
 batch_size: 256
+steps_per_update: 1
 reward_coef: 0.1
 value_coef: 0.1
 consistency_coef: 20

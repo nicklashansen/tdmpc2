@@ -177,6 +177,9 @@ class TimeStepToGymWrapper:
 		camera_id = dict(quadruped=2).get(self.domain, camera_id)
 		return self.env.physics.render(height, width, camera_id)
 
+	def close(self):
+		self.env.close()
+
 
 def make_env(cfg):
 	"""
