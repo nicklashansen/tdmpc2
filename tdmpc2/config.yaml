@@ -5,6 +5,7 @@ defaults:
 task: dog-run
 obs: state
 episodic: false
+num_envs: 1
 
 # evaluation
 checkpoint: ???
@@ -14,6 +15,7 @@ eval_freq: 50000
 # training
 steps: 10_000_000
 batch_size: 256
+steps_per_update: 1
 reward_coef: 0.1
 value_coef: 0.1
 termination_coef: 1
@@ -64,8 +66,8 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: ???
-wandb_entity: ???
+wandb_project: tdmpc3
+wandb_entity: nicklashansen
 wandb_silent: false
 enable_wandb: true
 save_csv: true

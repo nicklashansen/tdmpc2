@@ -12,8 +12,11 @@ class TensorWrapper(gym.Wrapper):
 
 	def __init__(self, env):
 		super().__init__(env)
+		self._wrapped_vectorized = env.__class__.__name__ == 'Vectorized'
 	
 	def rand_act(self):
+		if self._wrapped_vectorized:
+			return self.env.rand_act()
 		return torch.from_numpy(self.action_space.sample().astype(np.float32))
 
 	def _try_f32_tensor(self, x):
@@ -31,12 +34,24 @@ class TensorWrapper(gym.Wrapper):
 			obs = self._try_f32_tensor(obs)
 		return obs
 
-	def reset(self, task_idx=None):
-		return self._obs_to_tensor(self.env.reset())
+	def reset(self, task_idx=None, **kwargs):
+		if self._wrapped_vectorized:
+			obs = self.env.reset(**kwargs)
+		else:
+			obs = self.env.reset()
+		return self._obs_to_tensor(obs)
 
-	def step(self, action):
-		obs, reward, done, info = self.env.step(action.numpy())
-		info = defaultdict(float, info)
-		info['success'] = float(info['success'])
-		info['terminated'] = torch.tensor(float(info['terminated']))
-		return self._obs_to_tensor(obs), torch.tensor(reward, dtype=torch.float32), done, info
+	def step(self, action, **kwargs):
+		if self._wrapped_vectorized:
+			obs, reward, terminated, truncated, info = self.env.step(action.numpy(), **kwargs)
+		else:
+			obs, reward, terminated, truncated, info = self.env.step(action.numpy())
+		reward = torch.tensor(reward, dtype=torch.float32)
+		terminated = torch.tensor(terminated)
+		truncated = torch.tensor(truncated)
+		done = terminated | truncated
+		if 'success' not in info:
+			info['success'] = torch.zeros_like(reward)
+		info['terminated'] = terminated.float()
+		info['truncated'] = truncated.float()
+		return self._obs_to_tensor(obs), reward, done, info

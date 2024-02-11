@@ -84,15 +84,12 @@ def two_hot_inv(x, cfg):
 	return symexp(x)
 
 
-def gumbel_softmax_sample(p, temperature=1.0, dim=0):
-	"""Sample from the Gumbel-Softmax distribution."""
-	logits = p.log()
-	gumbels = (
-		-torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
-	)  # ~Gumbel(0,1)
-	gumbels = (logits + gumbels) / temperature  # ~Gumbel(logits,tau)
-	y_soft = gumbels.softmax(dim)
-	return y_soft.argmax(-1)
+def gumbel_softmax_sample(p, temperature=1.0, dim=1):
+	"""Sample indices from a Gumbel-Softmax distribution."""
+	logits = torch.log(p + 1e-9)
+	gumbels = -torch.empty_like(logits).exponential_().log()
+	y = (logits + gumbels) / temperature
+	return y.argmax(dim=dim)
 
 
 def termination_statistics(pred, target, eps=1e-9):

@@ -44,12 +44,16 @@ class DMControlWrapper:
 	def unwrapped(self):
 		return self.env
 	
+	@property
+	def metadata(self):
+		return None
+	
 	def _obs_to_array(self, obs):
 		return torch.from_numpy(
 			np.concatenate([v.flatten() for v in obs.values()], dtype=np.float32))
 	
 	def reset(self):
-		return self._obs_to_array(self.env.reset().observation)
+		return self._obs_to_array(self.env.reset().observation), defaultdict(float)
 
 	def step(self, action):
 		reward = 0
@@ -61,6 +65,9 @@ class DMControlWrapper:
 	
 	def render(self, width=384, height=384, camera_id=None):
 		return self.env.physics.render(height, width, camera_id or self.camera_id)
+	
+	def close(self):
+		self.env.close()
 
 
 class Pixels(gym.Wrapper):
@@ -87,6 +94,9 @@ class Pixels(gym.Wrapper):
 	def step(self, action):
 		_, reward, done, info = self.env.step(action)
 		return self._get_obs(), reward, done, info
+
+	def close(self):
+		self.env.close()
 
 
 def make_env(cfg):
