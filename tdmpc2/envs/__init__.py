@@ -27,6 +27,8 @@ try:
 except:
 	make_myosuite_env = missing_dependencies
 
+from envs.custom import make_env as make_custom_env
+
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 
@@ -62,7 +64,7 @@ def make_env(cfg):
 
 	else:
 		env = None
-		for fn in [make_dm_control_env, make_maniskill_env, make_metaworld_env, make_myosuite_env]:
+		for fn in [make_dm_control_env, make_maniskill_env, make_metaworld_env, make_myosuite_env, make_custom_env]:
 			try:
 				env = fn(cfg)
 			except ValueError:

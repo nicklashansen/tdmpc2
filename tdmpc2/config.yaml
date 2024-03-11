@@ -2,16 +2,16 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: dog-run
+task: basic-wipe
 obs: state
 
 # evaluation
 checkpoint: ???
 eval_episodes: 10
-eval_freq: 50000
+eval_freq: 10_000
 
 # training
-steps: 10_000_000
+steps: 100_000
 batch_size: 256
 reward_coef: 0.1
 value_coef: 0.1
@@ -62,10 +62,10 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: ???
-wandb_entity: ???
+wandb_project: robin-tdmpc2
+wandb_entity: calebchalmers
 wandb_silent: false
-disable_wandb: true
+disable_wandb: false
 save_csv: true
 
 # misc
