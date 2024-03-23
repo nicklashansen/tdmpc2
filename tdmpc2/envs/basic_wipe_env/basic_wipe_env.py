@@ -241,6 +241,13 @@ class BasicWipeEnv(gym.Env):
         if self.viewer is not None and self.viewer.is_alive:
             self.viewer.close()
 
+    def update_markers(self, obs_arr):
+        for i, obs in enumerate(obs_arr):
+            pos = obs[0:3]
+            self.model.site(f"marker{i}").pos = pos
+        mujoco.mj_forward(self.model, self.data)
+        self._update_renders()
+
 
 if __name__ == "__main__":
     env = BasicWipeEnv(render_mode="human")
