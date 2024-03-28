@@ -242,8 +242,10 @@ class BasicWipeEnv(gym.Env):
             self.viewer.close()
 
     def update_markers(self, obs_arr):
-        for i, obs in enumerate(obs_arr):
+        for i, obs in enumerate(obs_arr[0:]):
             pos = obs[0:3]
+            pos[2] += 0.4
+            # print(f"{i}: {pos}")
             self.model.site(f"marker{i}").pos = pos
         mujoco.mj_forward(self.model, self.data)
         self._update_renders()

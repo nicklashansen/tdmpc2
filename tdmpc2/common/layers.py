@@ -180,7 +180,7 @@ def enc(cfg, out={}):
 
 
 def dec(cfg):
-    k = "state"  # assume we are using state observations
+    # k = "state"  # assume we are using state observations
     # return mlp(
     #     cfg.latent_dim,
     #     max(cfg.num_enc_layers - 1, 1) * [cfg.enc_dim],
@@ -188,18 +188,24 @@ def dec(cfg):
     #     act=SimNorm(cfg),
     # )
 
-    layers = []
-    dims = (
-        [cfg.latent_dim]
-        + [cfg.enc_dim] * max(cfg.num_enc_layers - 1, 1)
-        + [cfg.obs_shape[k][0] + cfg.task_dim]
+    # layers = []
+    # dims = (
+    #     [cfg.latent_dim]
+    #     + [cfg.enc_dim] * max(cfg.num_enc_layers - 1, 1)
+    #     + [cfg.obs_shape[k][0] + cfg.task_dim]
+    # )
+
+    # for i in range(0, len(dims) - 1):
+    #     layers.append(nn.Linear(dims[i], dims[i + 1]))
+    #     layers.append(nn.ReLU(inplace=True))
+
+    # print(dims)
+    # print(layers)
+
+    # return nn.Sequential(*layers)
+    return mlp(
+        cfg.latent_dim,
+        max(cfg.num_enc_layers - 1, 1) * [cfg.enc_dim],
+        cfg.obs_shape["state"][0] + cfg.task_dim,
+        act=None,
     )
-
-    for i in range(0, len(dims) - 1):
-        layers.append(nn.Linear(dims[i], dims[i + 1]))
-        layers.append(nn.ReLU(inplace=True))
-
-    print(dims)
-    print(layers)
-
-    return nn.Sequential(*layers)

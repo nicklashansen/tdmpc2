@@ -110,7 +110,7 @@ class TDMPC2:
             task = torch.tensor([task], device=self.device)
         z = self.model.encode(obs, task)
         if self.cfg.mpc:
-            a = self.plan(z, t0=t0, eval_mode=eval_mode, task=task)
+            a = self.plan(z, t0=t0, eval_mode=eval_mode, task=task)[0]
         else:
             a = self.model.pi(z, task)[int(not eval_mode)][0]
         return a.cpu()
@@ -222,9 +222,9 @@ class TDMPC2:
         score = score.squeeze(1).cpu().numpy()
         actions = elite_actions[:, np.random.choice(np.arange(score.shape[0]), p=score)]
         self._prev_mean = mean
-        a, std = actions[0], std[0]
+        a = actions
         if not eval_mode:
-            a += std * torch.randn(self.cfg.action_dim, device=std.device)
+            a += std * torch.randn(std.size(), device=std.device)
         return a.clamp_(-1, 1)
 
     def update_pi(self, zs, task):
@@ -259,7 +259,7 @@ class TDMPC2:
 
     def update_dec(self, z, obs):
         self.dec_optim.zero_grad(set_to_none=True)
-        dec_obs = self.model._decoder(z)
+        dec_obs = self.model.decode(z)
         dec_loss_fn = torch.nn.MSELoss()
         dec_loss = dec_loss_fn(dec_obs, obs)
         dec_loss.backward()
@@ -365,7 +365,7 @@ class TDMPC2:
         pi_loss = self.update_pi(zs.detach(), task)
 
         # Update decoder
-        dec_loss = self.update_dec(z.detach(), obs[0])
+        dec_loss = self.update_dec(self.model.encode(obs[0], task).detach(), obs[0])
 
         # Update target Q-functions
         self.model.soft_update_target_Q()

@@ -105,13 +105,7 @@ def evaluate(cfg: dict):
                 obs, reward, done, info = env.step(action)
                 ep_reward += reward
 
-                task_t = task_idx
-                obs_t = obs.to(agent.device, non_blocking=True).unsqueeze(0)
-                if task_t is not None:
-                    task_t = torch.tensor([task_t], device=agent.device)
-                z = agent.model.encode(obs_t, task_t)
-                de_obs = agent.model.decode(z)
-                env.unwrapped.update_markers([de_obs.cpu().detach().flatten()])
+                update_markers(agent, env, obs, t == 0, task_idx)
 
                 t += 1
                 if cfg.save_video:
@@ -140,6 +134,24 @@ def evaluate(cfg: dict):
                 f"Normalized score: {np.mean(scores):.02f}", "yellow", attrs=["bold"]
             )
         )
+
+
+def update_markers(agent, env, obs, t0, task_idx):
+    steps = 4  # 4 future actions, 5 total markers
+
+    task_t = task_idx
+    obs_t = obs.to(agent.device, non_blocking=True)
+    if task_t is not None:
+        task_t = torch.tensor([task_t], device=agent.device)
+    z_s = [agent.model.encode(obs_t, task_t)]
+
+    for _ in range(steps):
+        z = z_s[-1]
+        a = agent.plan(z, t0=t0, eval_mode=True, task=task_idx)[0]
+        z_s.append(agent.model.next(z, a, task_idx))
+
+    obs_arr = [agent.model.decode(z).cpu().detach().flatten() for z in z_s]
+    env.unwrapped.update_markers(obs_arr)
 
 
 if __name__ == "__main__":
