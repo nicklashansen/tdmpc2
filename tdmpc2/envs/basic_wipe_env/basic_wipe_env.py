@@ -58,15 +58,19 @@ class BasicWipeEnv(gym.Env):
             ]
         )
 
+        priv_info_space = spaces.Tuple(
+            [
+                # friction
+                spaces.Box(0, np.inf, shape=(3,), dtype=float),
+                # mass
+                spaces.Box(0, np.inf, shape=(1,), dtype=float),
+            ]
+        )
+
         self.observation_space = spaces.Dict(
             {
                 "obs": spaces.flatten_space(obs_space),
-                "priv_info": spaces.Dict(
-                    {
-                        "friction": spaces.Box(0, np.inf, shape=(3,), dtype=float),
-                        "mass": spaces.Box(0, np.inf, shape=(1,), dtype=float),
-                    }
-                ),
+                "priv_info": spaces.flatten_space(priv_info_space),
             }
         )
 
@@ -133,10 +137,12 @@ class BasicWipeEnv(gym.Env):
                     np.array([self.target_rot]),
                 ]
             ),
-            "priv_info": {
-                "friction": self.model.geom("floor").friction.copy(),
-                "mass": self.model.body("hand").mass.copy(),
-            },
+            "priv_info": np.concatenate(
+                [
+                    self.model.geom("floor").friction.copy(),
+                    self.model.body("hand").mass.copy(),
+                ]
+            ),
         }
 
     def _get_info(self):
