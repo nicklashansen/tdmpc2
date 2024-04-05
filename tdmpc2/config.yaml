@@ -62,8 +62,8 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: robin-tdmpc2
-wandb_entity: calebchalmers
+wandb_project: tdmpc2
+wandb_entity: robin-abba
 wandb_silent: false
 disable_wandb: false
 save_csv: true
