@@ -15,6 +15,10 @@ TORQUE_SCALE = 40
 SUCCESS_THRESH = 0.05
 SUCCESS_TIMESTEPS = 10
 
+DR_ENABLED = False
+DR_MAX_FRICTION = 2
+DR_MAX_MASS = 128
+
 MAX_STEPS = 100
 SUBSTEPS = 20
 
@@ -22,6 +26,7 @@ RENDER_WIDTH = 384
 RENDER_HEIGHT = 384
 RENDER_FPS = 15
 
+MARKER_SIZE = 0.1
 CUBE_SIZE = 0.2
 CUBE_VERTICES = np.array(
     [
@@ -86,14 +91,16 @@ class BasicWipeEnv(gym.Env):
         self.target_pos = np.zeros(3)
         self.target_rot = 0
 
-        self.randomization_enabled = True
-        self.rand_max_fric = 2
-        self.rand_max_mass = 128
+        self.randomization_enabled = DR_ENABLED
+        self.rand_max_fric = DR_MAX_FRICTION
+        self.rand_max_mass = DR_MAX_MASS
 
         self.viewer = None
         self.renderer = None
         self.render_mode = None
         self.set_render_mode("rgb_array")
+
+        self.marker_obs_arr = []
 
         self.max_episode_steps = MAX_STEPS
         self.success = False
@@ -254,14 +261,25 @@ class BasicWipeEnv(gym.Env):
         if self.viewer is not None and self.viewer.is_alive:
             self.viewer.close()
 
-    def update_markers(self, obs_arr):
-        for i, obs in enumerate(obs_arr[0:]):
+    def init_markers(self):
+        scn = self.renderer.scene
+        for obs in self.marker_obs_arr:
             pos = obs[0:3]
             pos[2] += 0.4
-            # print(f"{i}: {pos}")
-            self.model.site(f"marker{i}").pos = pos
-        mujoco.mj_forward(self.model, self.data)
-        self._update_renders()
+
+            scn.ngeom += 1
+            mujoco.mjv_initGeom(
+                scn.geoms[scn.ngeom - 1],
+                mujoco.mjtGeom.mjGEOM_SPHERE,
+                np.ones(3) * MARKER_SIZE,
+                pos,
+                np.identity(3).reshape(-1),
+                np.ones(4, dtype=np.float32),
+            )
+
+    def update_markers(self, obs_arr):
+        self.marker_obs_arr = obs_arr
+        self.init_markers()
 
 
 if __name__ == "__main__":
