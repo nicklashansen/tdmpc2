@@ -143,12 +143,14 @@ def update_markers(agent, env, obs, t0, task_idx):
     obs_t = obs.to(agent.device, non_blocking=True)
     if task_t is not None:
         task_t = torch.tensor([task_t], device=agent.device)
-    z_s = [agent.model.encode(obs_t, task_t)]
 
-    for _ in range(steps):
-        z = z_s[-1]
-        a = agent.plan(z, t0=t0, eval_mode=True, task=task_idx)[0]
-        z_s.append(agent.model.next(z, a, task_idx))
+    z_0 = agent.model.encode(obs_t, task_t)
+    horizon = agent.plan(z_0, t0=t0, eval_mode=True, task=task_idx)
+
+    z_s = [z_0]
+    for action in horizon:
+        z = agent.model.next(z_s[-1], action, task_idx)
+        z_s.append(z)
 
     obs_arr = [agent.model.decode(z).cpu().detach().flatten() for z in z_s]
     env.unwrapped.update_markers(obs_arr)

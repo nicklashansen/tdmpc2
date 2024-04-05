@@ -24,6 +24,5 @@
     <site name="marker1" pos=".1 .1 .1" size=".1 .1 .1" rgba="0.61 0.53 1.0 0.5"/>
     <site name="marker2" pos=".1 .1 .1" size=".1 .1 .1" rgba="0.58 0.69 1.0 0.5"/>
     <site name="marker3" pos=".1 .1 .1" size=".1 .1 .1" rgba="0.53 0.85 0.98 0.5"/>
-    <site name="marker4" pos=".1 .1 .1" size=".1 .1 .1" rgba="0.44 1.0 0.96 0.5"/>
   </worldbody>
 </mujoco>
