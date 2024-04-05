@@ -1,4 +1,5 @@
 import random
+from collections import deque
 import gym
 from gym import spaces
 import numpy as np
@@ -11,8 +12,8 @@ _this_file = pathlib.Path(__file__).resolve()
 
 FORCE_SCALE = 300
 TORQUE_SCALE = 40
-TARGET_RADIUS = 0.1
 SUCCESS_THRESH = 0.05
+SUCCESS_TIMESTEPS = 10
 
 MAX_STEPS = 100
 SUBSTEPS = 20
@@ -84,7 +85,10 @@ class BasicWipeEnv(gym.Env):
         self.substeps = SUBSTEPS
         self.target_pos = np.zeros(3)
         self.target_rot = 0
-        self.randomization_enabled = False
+
+        self.randomization_enabled = True
+        self.rand_max_fric = 2
+        self.rand_max_mass = 128
 
         self.viewer = None
         self.renderer = None
@@ -151,6 +155,7 @@ class BasicWipeEnv(gym.Env):
     def _get_sum_distance_to_keypoints(self):
         sum_dist = 0
         hand = self.data.body("hand")
+        vert_dists = np.zeros(len(CUBE_VERTICES))
         for i, vertex in enumerate(CUBE_VERTICES):
             hand_vertex = hand.xpos + Rotation.from_quat(
                 hand.xquat[[1, 2, 3, 0]]
@@ -160,11 +165,14 @@ class BasicWipeEnv(gym.Env):
             ).apply(vertex * CUBE_SIZE)
             dist = np.linalg.norm(hand_vertex - target_vertex)
             sum_dist += dist
-            self.vert_dists[i] = dist
+            vert_dists[i] = dist
+        self.success_history.append(np.all(vert_dists < SUCCESS_THRESH))
         return sum_dist
 
     def _check_success(self):
-        return np.all(self.vert_dists < SUCCESS_THRESH)
+        if len(self.success_history) < SUCCESS_TIMESTEPS:
+            return False
+        return np.all(self.success_history)
 
     def _get_distance_to_target(self):
         hand_pos = self.data.geom("hand").xpos
@@ -178,18 +186,30 @@ class BasicWipeEnv(gym.Env):
         target.pos = self.target_pos
         target.quat = quat_from_z_angle(self.target_rot)
 
-    def _randomize(self):
-        old_fric = self.model.geom("floor").friction.copy()
-        self.model.geom("floor").friction[0] = random.choice((0.0002, 0.2, 2.0))
-        old_mass = self.model.body("hand").mass.copy()
-        self.model.body("hand").mass[0] = random.choice((16, 32, 64, 128))
-        print(
-            f"changed floor.friction from {old_fric} to {self.model.geom('floor').friction}"
-        )
-        print(f"changed hand.mass from {old_mass} to {self.model.body('hand').mass}")
+    def set_params(self, *, fric0, mass0, show_changes=False):
+        assert fric0 >= 0.0
+        assert mass0 >= 0.0
+        old_fric0 = self.model.geom("floor").friction[0]
+        self.model.geom("floor").friction[0] = fric0
+        old_mass0 = self.model.body("hand").mass[0]
+        self.model.body("hand").mass[0] = mass0
+        if show_changes:
+            if old_fric0 != fric0:
+                print(f"changed friction0 from {old_fric0:.2f} to {fric0:.2f}")
+            if old_mass0 != mass0:
+                print(f"changed mass0 from {old_mass0:.2f} to {mass0:.2f}")
         # print(self.model.geom('floor'))
         # print(self.model.body('hand'))
         # reference: https://mujoco.readthedocs.io/en/stable/XMLreference.html
+
+    def _randomize(self):
+        self.set_params(
+            fric0=np.random.uniform(0.0, self.rand_max_fric),
+            mass0=np.random.uniform(
+                0.0, self.rand_max_mass
+            ),  # negligible probability of choosing 0.0 mass
+            show_changes=True,
+        )
 
     def reset(self):
         if self.randomization_enabled:
@@ -197,7 +217,7 @@ class BasicWipeEnv(gym.Env):
 
         # randomize target location
         self.target_pos = [0, 0, CUBE_SIZE]
-        self.vert_dists = np.ones(len(CUBE_VERTICES))
+        self.success_history = deque(maxlen=SUCCESS_TIMESTEPS)
         self._move_target()
 
         # reset simulation
@@ -210,33 +230,20 @@ class BasicWipeEnv(gym.Env):
         return self._get_obs()
 
     def step(self, action):
-
         force = action[0:3] * FORCE_SCALE
         torque = action[3] * TORQUE_SCALE
         self.data.qfrc_applied = np.concatenate((force, [0, 0, torque]))
 
-        # oldDistance = self._get_sum_distance_to_keypoints()
-
         for _ in range(self.substeps):
             mujoco.mj_step(self.model, self.data)
 
-        newDistance = self._get_sum_distance_to_keypoints()
-        # deltaDistance = newDistance - oldDistance
-        # reward = -deltaDistance
-        reward = -newDistance
-        # terminated = newDistance < TARGET_RADIUS
+        reward = -self._get_sum_distance_to_keypoints()
 
-        # if newDistance < TARGET_RADIUS:
-        #     self._move_target()
-        #     mujoco.mj_forward(self.model, self.data)
         observation = self._get_obs()
         self.success = self.success or self._check_success()
         info = self._get_info()
         self._update_renders()
 
-        # env automatically truncates when max_episode_steps is set during registration
-        # truncated = False
-        # terminated = self._check_success()
         terminated = False
         return observation, reward, terminated, info
 
@@ -258,18 +265,17 @@ class BasicWipeEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = BasicWipeEnv(render_mode="human")
+    env = BasicWipeEnv()
     while True:
         env.reset()
-        terminated = truncated = False
-        while not truncated:
+        terminated = False
+        while not terminated:
             act = (
                 5 * (env.target_pos - env.data.body("hand").xpos)
                 - 1.0 * env.data.qvel[:3]
             )
             act = np.r_[act, 0.0]
-            obs, reward, terminated, truncated, info = env.step(act)
-            print(env._check_success(), terminated, truncated)
-            print(env.vert_dists)
-            # print(env.vert_dists)
-            # print(env._get_distance_to_target())
+            obs, reward, terminated, info = env.step(act)
+            print(obs)
+            print(env._check_success(), terminated)
+            print(env.success_history)
