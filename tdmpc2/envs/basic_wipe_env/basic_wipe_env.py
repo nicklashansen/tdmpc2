@@ -15,7 +15,7 @@ TORQUE_SCALE = 40
 SUCCESS_THRESH = 0.05
 SUCCESS_TIMESTEPS = 10
 
-DR_ENABLED = False
+DR_ENABLED = True
 DR_MAX_FRICTION = 2
 DR_MAX_MASS = 128
 
@@ -26,7 +26,7 @@ RENDER_WIDTH = 384
 RENDER_HEIGHT = 384
 RENDER_FPS = 15
 
-MARKER_SIZE = 0.1
+MARKER_SIZE = 0.05
 CUBE_SIZE = 0.2
 CUBE_VERTICES = np.array(
     [
@@ -263,18 +263,32 @@ class BasicWipeEnv(gym.Env):
 
     def init_markers(self):
         scn = self.renderer.scene
-        for obs in self.marker_obs_arr:
+        for i, obs in enumerate(self.marker_obs_arr):
             pos = obs[0:3]
-            pos[2] += 0.4
+            pos[2] = 0.4
+
+            size = np.ones(3) * MARKER_SIZE
+            color = np.array([1, 1, 1, 0.25])
+
+            if i < 4:
+                size *= 1.4
+                color = np.array(
+                    [
+                        [0.62, 0.32, 1.0, 1.0],
+                        [0.61, 0.53, 1.0, 1.0],
+                        [0.58, 0.69, 1.0, 1.0],
+                        [0.53, 0.85, 0.98, 1.0],
+                    ]
+                )[i]
 
             scn.ngeom += 1
             mujoco.mjv_initGeom(
                 scn.geoms[scn.ngeom - 1],
                 mujoco.mjtGeom.mjGEOM_SPHERE,
-                np.ones(3) * MARKER_SIZE,
+                size,
                 pos,
                 np.identity(3).reshape(-1),
-                np.ones(4, dtype=np.float32),
+                color.astype(np.float32),
             )
 
     def update_markers(self, obs_arr):

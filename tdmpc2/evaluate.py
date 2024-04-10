@@ -105,7 +105,7 @@ def evaluate(cfg: dict):
                 obs, reward, done, info = env.step(action)
                 ep_reward += reward
 
-                update_markers(agent, env, obs, t == 0, task_idx)
+                update_markers(agent, env, cfg, obs, t == 0, task_idx)
 
                 t += 1
                 if cfg.save_video:
@@ -136,24 +136,31 @@ def evaluate(cfg: dict):
         )
 
 
-def update_markers(agent, env, obs, t0, task_idx):
-    steps = 4  # 4 future actions, 5 total markers
-
+def update_markers(agent, env, cfg, obs, t0, task_idx):
     task_t = task_idx
     obs_t = obs.to(agent.device, non_blocking=True)
     if task_t is not None:
         task_t = torch.tensor([task_t], device=agent.device)
 
-    z_0 = agent.model.encode(obs_t, task_t)
-    horizon = agent.plan(z_0, t0=t0, eval_mode=True, task=task_idx)
+    z_s = torch.empty(
+        1 + cfg.horizon * (cfg.num_pi_trajs + 1),
+        cfg.latent_dim,
+        device=agent.device,
+    )
 
-    z_s = [z_0]
-    for action in horizon:
-        z = agent.model.next(z_s[-1], action, task_idx)
-        z_s.append(z)
+    z_s[0] = agent.model.encode(obs_t, task_t)
 
-    obs_arr = [agent.model.decode(z).cpu().detach().flatten() for z in z_s]
-    env.unwrapped.update_markers(obs_arr)
+    # sample TDMPC planning
+    plan = agent.plan(z_s[0], t0=t0, eval_mode=True, task=task_idx)
+    for i, action in enumerate(plan):
+        z_s[i + 1] = agent.model.next(z_s[i], action, task_idx)
+
+    # sample all policy trajectories
+    z_s[cfg.horizon + 1 :] = agent.sample_trajectories(z_s[0], task=task_idx).reshape(
+        -1, cfg.latent_dim
+    )
+
+    env.unwrapped.update_markers(agent.model.decode(z_s).detach().cpu())
 
 
 if __name__ == "__main__":

@@ -227,6 +227,21 @@ class TDMPC2:
             a += std * torch.randn(std.size(), device=std.device)
         return a.clamp_(-1, 1)
 
+    def sample_trajectories(self, z, task=None):
+        zs = torch.empty(
+            self.cfg.horizon,
+            self.cfg.num_pi_trajs,
+            self.cfg.latent_dim,
+            device=self.device,
+        )
+
+        _z = z.repeat(self.cfg.num_pi_trajs, 1)
+        for t in range(self.cfg.horizon):
+            _z = self.model.next(_z, self.model.pi(_z, task)[1], task)
+            zs[t] = _z
+
+        return zs
+
     def update_pi(self, zs, task):
         """
         Update policy using a sequence of latent states.
