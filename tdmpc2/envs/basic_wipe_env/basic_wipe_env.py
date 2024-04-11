@@ -26,7 +26,7 @@ RENDER_WIDTH = 384
 RENDER_HEIGHT = 384
 RENDER_FPS = 15
 
-MARKER_SIZE = 0.05
+MARKER_SIZE = 0.01
 CUBE_SIZE = 0.2
 CUBE_VERTICES = np.array(
     [
@@ -80,7 +80,7 @@ class BasicWipeEnv(gym.Env):
             }
         )
 
-        self.action_space = spaces.Box(-1.0, 1.0, shape=(4,), dtype=float)
+        self.action_space = spaces.Box(-1.0, 1.0, shape=(3,), dtype=float)
 
         xml_path = _this_file.parent.joinpath("basic_wipe.xml")
         self.model = mujoco.MjModel.from_xml_path(xml_path.as_posix())
@@ -237,9 +237,9 @@ class BasicWipeEnv(gym.Env):
         return self._get_obs()
 
     def step(self, action):
-        force = action[0:3] * FORCE_SCALE
-        torque = action[3] * TORQUE_SCALE
-        self.data.qfrc_applied = np.concatenate((force, [0, 0, torque]))
+        force = action[0:2] * FORCE_SCALE
+        torque = action[2] * TORQUE_SCALE
+        self.data.qfrc_applied = np.concatenate((force, [0], [0, 0, torque]))
 
         for _ in range(self.substeps):
             mujoco.mj_step(self.model, self.data)
@@ -261,39 +261,60 @@ class BasicWipeEnv(gym.Env):
         if self.viewer is not None and self.viewer.is_alive:
             self.viewer.close()
 
-    def init_markers(self):
-        scn = self.renderer.scene
-        for i, obs in enumerate(self.marker_obs_arr):
-            pos = obs[0:3]
-            pos[2] = 0.4
+    def update_trajectories(self, trajectories):
+        for j, traj in enumerate(trajectories):
+            for i in range(len(traj) - 1):
+                pos1 = traj[i, 0:3]
+                pos1[2] = 0.4
 
-            size = np.ones(3) * MARKER_SIZE
-            color = np.array([1, 1, 1, 0.25])
+                pos2 = traj[i + 1, 0:3]
+                pos2[2] = 0.4
 
-            if i < 4:
-                size *= 1.4
-                color = np.array(
-                    [
-                        [0.62, 0.32, 1.0, 1.0],
-                        [0.61, 0.53, 1.0, 1.0],
-                        [0.58, 0.69, 1.0, 1.0],
-                        [0.53, 0.85, 0.98, 1.0],
-                    ]
-                )[i]
+                size = np.ones(3) * MARKER_SIZE
+                color = np.array([1, 1, 1, 0.2], dtype=np.float64)
 
-            scn.ngeom += 1
-            mujoco.mjv_initGeom(
-                scn.geoms[scn.ngeom - 1],
-                mujoco.mjtGeom.mjGEOM_SPHERE,
-                size,
-                pos,
-                np.identity(3).reshape(-1),
-                color.astype(np.float32),
-            )
+                # color[:3] *= float(j / (len(trajectories) - 1))
 
-    def update_markers(self, obs_arr):
-        self.marker_obs_arr = obs_arr
-        self.init_markers()
+                if j == 0:
+                    # size *= 1.4
+                    color = np.array(
+                        [
+                            [0.62, 0.32, 1.0, 1.0],
+                            [0.61, 0.53, 1.0, 1.0],
+                            [0.58, 0.69, 1.0, 1.0],
+                            [0.53, 0.85, 0.98, 1.0],
+                        ]
+                    )[i]
+
+                scn = self.renderer.scene
+                scn.ngeom += 1
+                # mujoco.mjv_initGeom(
+                #     scn.geoms[scn.ngeom - 1],
+                #     mujoco.mjtGeom.mjGEOM_SPHERE,
+                #     size,
+                #     pos,
+                #     np.identity(3).reshape(-1),
+                #     color.astype(np.float32),
+                # )
+                mujoco.mjv_initGeom(
+                    scn.geoms[scn.ngeom - 1],
+                    mujoco.mjtGeom.mjGEOM_CAPSULE,
+                    np.zeros(3),
+                    np.zeros(3),
+                    np.zeros(9),
+                    color.astype(np.float32),
+                )
+                mujoco.mjv_makeConnector(
+                    scn.geoms[scn.ngeom - 1],
+                    mujoco.mjtGeom.mjGEOM_CAPSULE,
+                    MARKER_SIZE,
+                    pos1[0],
+                    pos1[1],
+                    pos1[2],
+                    pos2[0],
+                    pos2[1],
+                    pos2[2],
+                )
 
 
 if __name__ == "__main__":

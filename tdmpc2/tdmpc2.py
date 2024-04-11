@@ -229,18 +229,18 @@ class TDMPC2:
 
     def sample_trajectories(self, z, task=None):
         zs = torch.empty(
-            self.cfg.horizon,
+            self.cfg.horizon + 1,
             self.cfg.num_pi_trajs,
             self.cfg.latent_dim,
             device=self.device,
         )
 
-        _z = z.repeat(self.cfg.num_pi_trajs, 1)
-        for t in range(self.cfg.horizon):
-            _z = self.model.next(_z, self.model.pi(_z, task)[1], task)
-            zs[t] = _z
+        zs[0] = z.repeat(self.cfg.num_pi_trajs, 1)
 
-        return zs
+        for t in range(self.cfg.horizon):
+            zs[t + 1] = self.model.next(zs[t], self.model.pi(zs[t], task)[1], task)
+
+        return zs.transpose(0, 1)
 
     def update_pi(self, zs, task):
         """

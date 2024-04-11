@@ -142,25 +142,24 @@ def update_markers(agent, env, cfg, obs, t0, task_idx):
     if task_t is not None:
         task_t = torch.tensor([task_t], device=agent.device)
 
+    z_0 = agent.model.encode(obs_t, task_t)
     z_s = torch.empty(
-        1 + cfg.horizon * (cfg.num_pi_trajs + 1),
+        cfg.num_pi_trajs + 1,
+        cfg.horizon + 1,
         cfg.latent_dim,
         device=agent.device,
     )
 
-    z_s[0] = agent.model.encode(obs_t, task_t)
-
     # sample TDMPC planning
-    plan = agent.plan(z_s[0], t0=t0, eval_mode=True, task=task_idx)
+    plan = agent.plan(z_0, t0=t0, eval_mode=True, task=task_idx)
+    z_s[0, 0] = z_0
     for i, action in enumerate(plan):
-        z_s[i + 1] = agent.model.next(z_s[i], action, task_idx)
+        z_s[0, i + 1] = agent.model.next(z_s[0, i], action, task_idx)
 
     # sample all policy trajectories
-    z_s[cfg.horizon + 1 :] = agent.sample_trajectories(z_s[0], task=task_idx).reshape(
-        -1, cfg.latent_dim
-    )
+    z_s[1:] = agent.sample_trajectories(z_0, task=task_idx)
 
-    env.unwrapped.update_markers(agent.model.decode(z_s).detach().cpu())
+    env.unwrapped.update_trajectories(agent.model.decode(z_s).detach().cpu())
 
 
 if __name__ == "__main__":
