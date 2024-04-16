@@ -105,11 +105,11 @@ def evaluate(cfg: dict):
                 obs, reward, done, info = env.step(action)
                 ep_reward += reward
 
-                update_markers(agent, env, cfg, obs, t == 0, task_idx)
+                if cfg.save_video:
+                    update_markers(agent, env, cfg, obs, t == 0, task_idx)
+                    frames.append(env.render())
 
                 t += 1
-                if cfg.save_video:
-                    frames.append(env.render())
             ep_rewards.append(ep_reward)
             ep_successes.append(info["success"])
             if cfg.save_video:
