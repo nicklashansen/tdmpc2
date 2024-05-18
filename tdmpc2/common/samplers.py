@@ -345,6 +345,12 @@ class SliceSampler(Sampler):
         # no op
         ...
 
+    def state_dict(self):
+        ...
+
+    def load_state_dict(self, state_dict):
+        ...
+
     def __getstate__(self):
         state = copy(self.__dict__)
         state["_cache"] = {}
