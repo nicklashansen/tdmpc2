@@ -12,7 +12,7 @@ class Buffer():
 
 	def __init__(self, cfg):
 		self.cfg = cfg
-		self._device = torch.device('cuda')
+		self._device = torch.device('cuda:0')
 		self._capacity = min(cfg.buffer_size, cfg.steps)
 		self._sampler = SliceSampler(
 			num_slices=self.cfg.batch_size,
@@ -28,7 +28,7 @@ class Buffer():
 	def capacity(self):
 		"""Return the capacity of the buffer."""
 		return self._capacity
-	
+
 	@property
 	def num_eps(self):
 		"""Return the number of episodes in the buffer."""
@@ -41,8 +41,8 @@ class Buffer():
 		return ReplayBuffer(
 			storage=storage,
 			sampler=self._sampler,
-			pin_memory=True,
-			prefetch=1,
+			pin_memory=False,
+			prefetch=0,
 			batch_size=self._batch_size,
 		)
 
@@ -58,32 +58,30 @@ class Buffer():
 		total_bytes = bytes_per_step*self._capacity
 		print(f'Storage required: {total_bytes/1e9:.2f} GB')
 		# Heuristic: decide whether to use CUDA or CPU memory
-		storage_device = 'cuda' if 2.5*total_bytes < mem_free else 'cpu'
+		storage_device = 'cuda:0' if 2.5*total_bytes < mem_free else 'cpu'
 		print(f'Using {storage_device.upper()} memory for storage.')
+		self._storage_device = torch.device(storage_device)
 		return self._reserve_buffer(
-			LazyTensorStorage(self._capacity, device=torch.device(storage_device))
+			LazyTensorStorage(self._capacity, device=self._storage_device)
 		)
-
-	def _to_device(self, *args, device=None):
-		if device is None:
-			device = self._device
-		return (arg.to(device, non_blocking=True) \
-			if arg is not None else None for arg in args)
 
 	def _prepare_batch(self, td):
 		"""
 		Prepare a sampled batch for training (post-processing).
 		Expects `td` to be a TensorDict with batch size TxB.
 		"""
-		obs = td['obs']
-		action = td['action'][1:]
-		reward = td['reward'][1:].unsqueeze(-1)
-		task = td['task'][0] if 'task' in td.keys() else None
-		return self._to_device(obs, action, reward, task)
+		td = td.select("obs", "action", "reward", "task", strict=False).to(self._device, non_blocking=True)
+		obs = td.get('obs').contiguous()
+		action = td.get('action')[1:].contiguous()
+		reward = td.get('reward')[1:].unsqueeze(-1).contiguous()
+		task = td.get('task', None)
+		if task is not None:
+			task = task[0].contiguous()
+		return obs, action, reward, task
 
 	def add(self, td):
 		"""Add an episode to the buffer."""
-		td['episode'] = torch.ones_like(td['reward'], dtype=torch.int64) * self._num_eps
+		td['episode'] = torch.full_like(td['reward'], self._num_eps, dtype=torch.int64)
 		if self._num_eps == 0:
 			self._buffer = self._init(td)
 		self._buffer.extend(td)

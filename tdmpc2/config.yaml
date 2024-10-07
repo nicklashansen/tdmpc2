@@ -86,3 +86,7 @@ action_dims: ???
 episode_lengths: ???
 seed_steps: ???
 bin_size: ???
+
+# compile
+compile: False
+cudagraphs: False
