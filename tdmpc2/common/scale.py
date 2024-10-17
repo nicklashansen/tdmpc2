@@ -7,19 +7,15 @@ class RunningScale(torch.nn.Module):
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
-		self._value = Buffer(torch.ones(1, dtype=torch.float32, device=torch.device('cuda')))
+		self.value = Buffer(torch.ones(1, dtype=torch.float32, device=torch.device('cuda')))
 		self._percentiles = Buffer(torch.tensor([5, 95], dtype=torch.float32, device=torch.device('cuda')))
 
 	def state_dict(self):
-		return dict(value=self._value, percentiles=self._percentiles)
+		return dict(value=self.value, percentiles=self._percentiles)
 
 	def load_state_dict(self, state_dict):
-		self._value.copy_(state_dict['value'])
+		self.value.copy_(state_dict['value'])
 		self._percentiles.copy_(state_dict['percentiles'])
-
-	@property
-	def value(self):
-		return self._value
 
 	def _positions(self, x_shape):
 		positions = self._percentiles * (x_shape-1) / 100
@@ -42,7 +38,7 @@ class RunningScale(torch.nn.Module):
 	def update(self, x):
 		percentiles = self._percentile(x.detach())
 		value = torch.clamp(percentiles[1] - percentiles[0], min=1.)
-		self._value.lerp_(value, self.cfg.tau)
+		self.value.data.lerp_(value, self.cfg.tau)
 
 	def forward(self, x, update=False):
 		if update:

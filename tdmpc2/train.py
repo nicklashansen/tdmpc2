@@ -23,6 +23,22 @@ from typing import Any
 from omegaconf import OmegaConf
 torch.backends.cudnn.benchmark = True
 
+torch.set_float32_matmul_precision('high')
+
+def cfg_to_dataclass(cfg, frozen=False):
+	# Converts an OmegaConf config to a dataclass, which will not cause graph breaks
+	cfg_dict = OmegaConf.to_container(cfg)
+	fields = []
+	for key, value in cfg_dict.items():
+		fields.append((key, Any, dataclasses.field(default_factory=lambda value_=value: value_)))
+
+	# Create the dataclass
+	dataclass_name = "Config"
+	dataclass = dataclasses.make_dataclass(dataclass_name, fields, frozen=frozen)
+	def get(self, val, default=None):
+		return getattr(self, val, default)
+	dataclass.get = get
+	return dataclass()
 
 def cfg_to_dataclass(cfg, frozen=False):
 	# Converts an OmegaConf config to a dataclass, which will not cause graph breaks
