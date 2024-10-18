@@ -1,11 +1,11 @@
+import dataclasses
 import os
 import datetime
 import re
 import numpy as np
 import pandas as pd
 from termcolor import colored
-from omegaconf import OmegaConf
-
+from torchrl._utils import timeit
 from common import TASK_SET
 
 
@@ -133,7 +133,7 @@ class Logger:
 			group=self._group,
 			tags=cfg_to_group(cfg, return_list=True) + [f"seed:{cfg.seed}"],
 			dir=self._log_dir,
-			config=OmegaConf.to_container(cfg, resolve=True),
+			config=dataclasses.asdict(cfg),
 		)
 		print(colored("Logs will be synced with wandb.", "blue", attrs=["bold"]))
 		self._wandb = wandb
@@ -238,3 +238,5 @@ class Logger:
 				self._log_dir / "eval.csv", header=keys, index=None
 			)
 		self._print(d, category)
+		timeit.print()
+		timeit.erase()
