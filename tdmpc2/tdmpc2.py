@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 import functools
-from torchrl._utils import timeit
 
 from common import math
 from common.scale import RunningScale
@@ -280,8 +279,7 @@ class TDMPC2(torch.nn.Module):
 		Returns:
 			dict: Dictionary of training statistics.
 		"""
-		with timeit("sample"):
-			obs, action, reward, task = buffer.sample()
+		obs, action, reward, task = buffer.sample()
 		kwargs = {}
 		if task is not None:
 			kwargs["task"] = task

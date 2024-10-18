@@ -5,7 +5,6 @@ import re
 import numpy as np
 import pandas as pd
 from termcolor import colored
-from torchrl._utils import timeit
 from common import TASK_SET
 
 
@@ -238,5 +237,3 @@ class Logger:
 				self._log_dir / "eval.csv", header=keys, index=None
 			)
 		self._print(d, category)
-		timeit.print()
-		timeit.erase()

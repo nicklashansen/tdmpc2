@@ -1,11 +1,9 @@
 from copy import deepcopy
 
-import numpy as np
 import torch
 import torch.nn as nn
 
 from common import layers, math, init
-from tensordict import TensorDict
 from tensordict.nn import TensorDictParams
 
 class WorldModel(nn.Module):
@@ -47,6 +45,14 @@ class WorldModel(nn.Module):
 		# Assign params to modules
 		self._detach_Qs.params = self._detach_Qs_params
 		self._target_Qs.params = self._target_Qs_params
+
+	def __repr__(self):
+		repr = 'TD-MPC2 World Model\n'
+		modules = ['Encoder', 'Dynamics', 'Reward', 'Policy prior', 'Q-functions']
+		for i, m in enumerate([self._encoder, self._dynamics, self._reward, self._pi, self._Qs]):
+			repr += f"{modules[i]}: {m}\n"
+		repr += "Learnable parameters: {:,}".format(self.total_params)
+		return repr
 
 	@property
 	def total_params(self):

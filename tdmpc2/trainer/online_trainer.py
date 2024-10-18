@@ -3,7 +3,6 @@ from time import time
 import numpy as np
 import torch
 from tensordict.tensordict import TensorDict
-from torchrl._utils import timeit
 from trainer.base import Trainer
 
 
@@ -68,53 +67,49 @@ class OnlineTrainer(Trainer):
 		"""Train a TD-MPC2 agent."""
 		train_metrics, done, eval_next = {}, True, False
 		while self._step <= self.cfg.steps:
-			with timeit("global-step"):
-				# Evaluate agent periodically
-				if self._step > 0 and self._step % self.cfg.eval_freq == 0:
-					eval_next = True
+			# Evaluate agent periodically
+			if self._step > 0 and self._step % self.cfg.eval_freq == 0:
+				eval_next = True
 
-				# Reset environment
-				if done or (self._step == self.cfg.seed_steps + 1):
-					if eval_next:
-						eval_metrics = self.eval()
-						eval_metrics.update(self.common_metrics())
-						self.logger.log(eval_metrics, 'eval')
-						eval_next = False
+			# Reset environment
+			if done or (self._step == self.cfg.seed_steps + 1):
+				if eval_next:
+					eval_metrics = self.eval()
+					eval_metrics.update(self.common_metrics())
+					self.logger.log(eval_metrics, 'eval')
+					eval_next = False
 
-					if self._step > 0:
-						train_metrics.update(
-							episode_reward=torch.tensor([td['reward'] for td in self._tds[1:]]).sum(),
-							episode_success=info['success'],
-						)
-						train_metrics.update(self.common_metrics())
-						train_metrics.update(timeit.todict())
-						self.logger.log(train_metrics, 'train')
-						self._ep_idx = self.buffer.add(torch.cat(self._tds))
+				if self._step > 0:
+					train_metrics.update(
+						episode_reward=torch.tensor([td['reward'] for td in self._tds[1:]]).sum(),
+						episode_success=info['success'],
+					)
+					train_metrics.update(self.common_metrics())
+					self.logger.log(train_metrics, 'train')
+					self._ep_idx = self.buffer.add(torch.cat(self._tds))
 
-					obs = self.env.reset()
-					self._tds = [self.to_td(obs)]
+				obs = self.env.reset()
+				self._tds = [self.to_td(obs)]
 
-				# Collect experience
-				with timeit("act"):
-					if self._step > self.cfg.seed_steps:
-						action = self.agent.act(obs, t0=len(self._tds)==1)
-					else:
-						action = self.env.rand_act()
-				obs, reward, done, info = self.env.step(action)
-				self._tds.append(self.to_td(obs, action, reward))
+			# Collect experience
+			if self._step > self.cfg.seed_steps:
+				action = self.agent.act(obs, t0=len(self._tds)==1)
+			else:
+				action = self.env.rand_act()
+			obs, reward, done, info = self.env.step(action)
+			self._tds.append(self.to_td(obs, action, reward))
 
-				# Update agent
-				if self._step >= self.cfg.seed_steps:
-					if self._step == self.cfg.seed_steps:
-						num_updates = self.cfg.seed_steps
-						print('Pretraining agent on seed data...')
-					else:
-						num_updates = 1
-					for _ in range(num_updates):
-						with timeit("update"):
-						   _train_metrics = self.agent.update(self.buffer)
-					train_metrics.update(_train_metrics)
+			# Update agent
+			if self._step >= self.cfg.seed_steps:
+				if self._step == self.cfg.seed_steps:
+					num_updates = self.cfg.seed_steps
+					print('Pretraining agent on seed data...')
+				else:
+					num_updates = 1
+				for _ in range(num_updates):
+					_train_metrics = self.agent.update(self.buffer)
+				train_metrics.update(_train_metrics)
 
-				self._step += 1
+			self._step += 1
 
 		self.logger.finish(self.agent)
