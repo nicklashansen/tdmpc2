@@ -12,6 +12,15 @@ Official implementation of
 
 ----
 
+**Note: the `speedups` branch is experimental and may contain bugs. Please use the `main` branch for the latest stable release.**
+
+Expect **3-8x** faster wall-time (depending on hardware and task) compared to `main` branch. A majority of the speedups in this branch are enabled with the additional flag `compile=true`. To run the code with `compile=true`, **you will need to install the latest `nightly` versions of PyTorch, TensorDict, and TorchRL**. See `docker/environment.yaml` for a tested configuration. We are not responsible for any issues that may arise from using our repository.
+
+Thank you to [Vincent Moens](https://github.com/vmoens) who has been a key contributor to this branch!
+
+----
+
+
 ## Overview
 
 TD-MPC**2** is a scalable, robust model-based reinforcement learning algorithm. It compares favorably to existing model-free and model-based methods across **104** continuous control tasks spanning multiple domains, with a *single* set of hyperparameters (*right*). We further demonstrate the scalability of TD-MPC**2** by training a single 317M parameter agent to perform **80** tasks across multiple domains, embodiments, and action spaces (*left*). 

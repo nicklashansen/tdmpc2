@@ -1,14 +1,10 @@
 import torch
 import torch.nn.functional as F
-import functools
 
 from common import math
 from common.scale import RunningScale
 from common.world_model import WorldModel
-from tensordict.nn import CudaGraphModule
 from tensordict import TensorDict
-
-CG_WARMUP = 1000
 
 
 class TDMPC2(torch.nn.Module):
@@ -21,11 +17,8 @@ class TDMPC2(torch.nn.Module):
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
-
 		self.device = torch.device('cuda:0')
-
 		self.model = WorldModel(cfg).to(self.device)
-		capturable = True
 		self.optim = torch.optim.Adam([
 			{'params': self.model._encoder.parameters(), 'lr': self.cfg.lr*self.cfg.enc_lr_scale},
 			{'params': self.model._dynamics.parameters()},
@@ -33,8 +26,8 @@ class TDMPC2(torch.nn.Module):
 			{'params': self.model._Qs.parameters()},
 			{'params': self.model._task_emb.parameters() if self.cfg.multitask else []
 			 }
-		], lr=self.cfg.lr, capturable=capturable)
-		self.pi_optim = torch.optim.Adam(self.model._pi.parameters(), lr=self.cfg.lr, eps=1e-5, capturable=capturable)
+		], lr=self.cfg.lr, capturable=True)
+		self.pi_optim = torch.optim.Adam(self.model._pi.parameters(), lr=self.cfg.lr, eps=1e-5, capturable=True)
 		self.model.eval()
 		self.scale = RunningScale(cfg)
 		self.cfg.iterations += 2*int(cfg.action_dim >= 20) # Heuristic for large action spaces
@@ -42,43 +35,16 @@ class TDMPC2(torch.nn.Module):
 			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='cuda:0'
 		) if self.cfg.multitask else self._get_discount(cfg.episode_length)
 		self._prev_mean = torch.nn.Buffer(torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device))
-
 		if cfg.compile:
-			mode = None if cfg.cudagraphs else "reduce-overhead"
 			print('compiling - update')
-			self._update = torch.compile(self._update, mode=mode)
-
-		if cfg.cudagraphs:
-			print('cudagraphs - update')
-			self._update = CudaGraphModule(self._update, warmup=CG_WARMUP)
+			self._update = torch.compile(self._update, mode="reduce-overhead")
 
 	@property
 	def plan(self):
 		_plan_val = getattr(self, "_plan_val", None)
 		if _plan_val is not None:
 			return _plan_val
-		if self.cfg.cudagraphs:
-			print('cudagraphs - plan')
-			self._plan_dict = {
-				(True, True): functools.partial(self._plan, t0=True, eval_mode=True),
-				(False, True): functools.partial(self._plan, t0=False, eval_mode=True),
-				(True, False): functools.partial(self._plan, t0=True, eval_mode=False),
-				(False, False): functools.partial(self._plan, t0=False, eval_mode=False),
-			}
-			if self.cfg.compile:
-				print('compiling - plan')
-				mode = None
-				self._plan_dict = {k: torch.compile(func, mode=mode) for k, func in self._plan_dict.items()}
-
-			self._plan_dict = {k: CudaGraphModule(func, warmup=CG_WARMUP) for k, func in self._plan_dict.items()}
-			def plan(obs, t0=False, eval_mode=False, task=None):
-				if task is not None:
-					kwargs = {"task": task}
-				else:
-					kwargs = {}
-				torch.compiler.cudagraph_mark_step_begin()
-				return self._plan_dict[(t0, eval_mode)](obs=obs, **kwargs)
-		elif self.cfg.compile:
+		if self.cfg.compile:
 			plan = torch.compile(self._plan, mode="reduce-overhead")
 		else:
 			plan = self._plan
@@ -247,7 +213,6 @@ class TDMPC2(torch.nn.Module):
 		pi_loss.backward()
 		pi_grad_norm = torch.nn.utils.clip_grad_norm_(self.model._pi.parameters(), self.cfg.grad_clip_norm)
 		self.pi_optim.step()
-		# For some reason, cudagraph prefers to see the zero grad after step
 		self.pi_optim.zero_grad(set_to_none=True)
 
 		return pi_loss.detach(), pi_grad_norm
@@ -268,23 +233,6 @@ class TDMPC2(torch.nn.Module):
 		pi = self.model.pi(next_z, task)[1]
 		discount = self.discount[task].unsqueeze(-1) if self.cfg.multitask else self.discount
 		return reward + discount * self.model.Q(next_z, pi, task, return_type='min', target=True)
-
-	def update(self, buffer):
-		"""
-		Main update function. Corresponds to one iteration of model learning.
-
-		Args:
-			buffer (common.buffer.Buffer): Replay buffer.
-
-		Returns:
-			dict: Dictionary of training statistics.
-		"""
-		obs, action, reward, task = buffer.sample()
-		kwargs = {}
-		if task is not None:
-			kwargs["task"] = task
-		torch.compiler.cudagraph_mark_step_begin()
-		return self._update(obs, action, reward, **kwargs)
 
 	def _update(self, obs, action, reward, task=None):
 		# Compute targets
@@ -314,7 +262,7 @@ class TDMPC2(torch.nn.Module):
 		reward_loss, value_loss = 0, 0
 		for t, (rew_pred_unbind, rew_unbind, td_targets_unbind, qs_unbind) in enumerate(zip(reward_preds.unbind(0), reward.unbind(0), td_targets.unbind(0), qs.unbind(1))):
 			reward_loss = reward_loss + math.soft_ce(rew_pred_unbind, rew_unbind, self.cfg).mean() * self.cfg.rho**t
-			for q, qs_unbind_unbind in enumerate(qs_unbind.unbind(0)):
+			for _, qs_unbind_unbind in enumerate(qs_unbind.unbind(0)):
 				value_loss = value_loss + math.soft_ce(qs_unbind_unbind, td_targets_unbind, self.cfg).mean() * self.cfg.rho**t
 
 		consistency_loss = consistency_loss / self.cfg.horizon
@@ -350,3 +298,20 @@ class TDMPC2(torch.nn.Module):
 			"pi_grad_norm": pi_grad_norm,
 			"pi_scale": self.scale.value,
 		}).detach().mean()
+
+	def update(self, buffer):
+		"""
+		Main update function. Corresponds to one iteration of model learning.
+
+		Args:
+			buffer (common.buffer.Buffer): Replay buffer.
+
+		Returns:
+			dict: Dictionary of training statistics.
+		"""
+		obs, action, reward, task = buffer.sample()
+		kwargs = {}
+		if task is not None:
+			kwargs["task"] = task
+		torch.compiler.cudagraph_mark_step_begin()
+		return self._update(obs, action, reward, **kwargs)

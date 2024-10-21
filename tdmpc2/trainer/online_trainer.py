@@ -68,11 +68,11 @@ class OnlineTrainer(Trainer):
 		train_metrics, done, eval_next = {}, True, False
 		while self._step <= self.cfg.steps:
 			# Evaluate agent periodically
-			if self._step > 0 and self._step % self.cfg.eval_freq == 0:
+			if self._step % self.cfg.eval_freq == 0:
 				eval_next = True
 
 			# Reset environment
-			if done or (self._step == self.cfg.seed_steps + 1):
+			if done:
 				if eval_next:
 					eval_metrics = self.eval()
 					eval_metrics.update(self.common_metrics())

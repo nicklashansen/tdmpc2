@@ -9,10 +9,8 @@ def soft_ce(pred, target, cfg):
 	return -(target * pred).sum(-1, keepdim=True)
 
 
-
 def log_std(x, low, dif):
 	return low + 0.5 * dif * (torch.tanh(x) + 1)
-
 
 
 def _gaussian_residual(eps, log_std):
@@ -32,7 +30,6 @@ def gaussian_logprob(eps, log_std, size=None):
 	return _gaussian_logprob(residual) * size
 
 
-
 def _squash(pi):
 	return torch.log(F.relu(1 - pi.pow(2)) + 1e-6)
 
@@ -45,14 +42,12 @@ def squash(mu, pi, log_pi):
 	return mu, pi, log_pi
 
 
-
 def symlog(x):
 	"""
 	Symmetric logarithmic function.
 	Adapted from https://github.com/danijar/dreamerv3.
 	"""
 	return torch.sign(x) * torch.log(1 + torch.abs(x))
-
 
 
 def symexp(x):
@@ -89,6 +84,7 @@ def two_hot_inv(x, cfg):
 	x = F.softmax(x, dim=-1)
 	x = torch.sum(x * dreg_bins, dim=-1, keepdim=True)
 	return symexp(x)
+
 
 def gumbel_softmax_sample(p, temperature=1.0, dim=0):
 	logits = p.log()

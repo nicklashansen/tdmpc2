@@ -2,9 +2,11 @@ import dataclasses
 import os
 import datetime
 import re
+
 import numpy as np
 import pandas as pd
 from termcolor import colored
+
 from common import TASK_SET
 
 
@@ -115,7 +117,7 @@ class Logger:
 		print_run(cfg)
 		self.project = cfg.get("wandb_project", "none")
 		self.entity = cfg.get("wandb_entity", "none")
-		if cfg.disable_wandb or self.project == "none" or self.entity == "none":
+		if not cfg.enable_wandb or self.project == "none" or self.entity == "none":
 			print(colored("Wandb disabled.", "blue", attrs=["bold"]))
 			cfg.save_agent = False
 			cfg.save_video = False
