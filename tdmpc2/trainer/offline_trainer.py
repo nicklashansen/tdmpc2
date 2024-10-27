@@ -44,13 +44,12 @@ class OfflineTrainer(Trainer):
 			'Offline training only supports multitask training with mt30 or mt80 task sets.'
 
 		# Load data
-		assert self.cfg.task in self.cfg.data_dir, \
-			f'Expected data directory {self.cfg.data_dir} to contain {self.cfg.task}, ' \
-			f'please double-check your config.'
 		fp = Path(os.path.join(self.cfg.data_dir, '*.pt'))
 		fps = sorted(glob(str(fp)))
 		assert len(fps) > 0, f'No data found at {fp}'
 		print(f'Found {len(fps)} files in {fp}')
+		assert len(fps) == (20 if self.cfg.task == 'mt80' else 4), \
+			f'Expected 20 files for mt80 task set, 4 files for mt30 task set, found {len(fps)} files.'
 	
 		# Create buffer for sampling
 		_cfg = deepcopy(self.cfg)
@@ -65,8 +64,9 @@ class OfflineTrainer(Trainer):
 				f'please double-check your config.'
 			for i in range(len(td)):
 				self.buffer.add(td[i])
-		assert self.buffer.num_eps == self.buffer.capacity, \
-			f'Buffer has {self.buffer.num_eps} episodes, expected {self.buffer.capacity} episodes.'
+		expected_episodes = _cfg.buffer_size // _cfg.episode_length
+		assert self.buffer.num_eps == expected_episodes, \
+			f'Buffer has {self.buffer.num_eps} episodes, expected {expected_episodes} episodes.'
 		
 		print(f'Training agent for {self.cfg.steps} iterations...')
 		metrics = {}

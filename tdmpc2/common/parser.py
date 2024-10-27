@@ -53,7 +53,7 @@ def parse_cfg(cfg: OmegaConf) -> OmegaConf:
 	if cfg.multitask:
 		cfg.task_title = cfg.task.upper()
 		# Account for slight inconsistency in task_dim for the mt30 experiments
-		cfg.task_dim = 96 if cfg.task == 'mt80' or cfg.model_size in {1, 317} else 64
+		cfg.task_dim = 96 if cfg.task == 'mt80' or cfg.get('model_size', 5) in {1, 317} else 64
 	else:
 		cfg.task_dim = 0
 	cfg.tasks = TASK_SET.get(cfg.task, [cfg.task])
