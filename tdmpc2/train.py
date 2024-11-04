@@ -18,6 +18,7 @@ from tdmpc2 import TDMPC2
 from trainer.offline_trainer import OfflineTrainer
 from trainer.online_trainer import OnlineTrainer
 from common.logger import Logger
+
 torch.backends.cudnn.benchmark = True
 torch.set_float32_matmul_precision('high')
 

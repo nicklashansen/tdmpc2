@@ -39,7 +39,7 @@ dependencies:
     - gpustat==1.1.1
     ####################
     # Gym:
-    # (unmaintained but required for maniskill2/meta-world/myosuite)
+    # (unmaintained but required for maniskill2/meta-world)
     - gym==0.21.0
     ####################
     # ManiSkill2:
@@ -51,6 +51,5 @@ dependencies:
     # - git+https://github.com/Farama-Foundation/Metaworld.git@04be337a12305e393c0caf0cbf5ec7755c7c8feb
     ####################
     # MyoSuite:
-    # (requires gym==0.13 which conflicts with meta-world / mani-skill2)
     # - myosuite
     ####################

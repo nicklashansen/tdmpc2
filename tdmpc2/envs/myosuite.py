@@ -24,9 +24,11 @@ class MyoSuiteWrapper(gym.Wrapper):
 		self.cfg = cfg
 		self.camera_id = 'hand_side_inter'
 
+	def reset(self):
+		return self.env.reset()[0]
+
 	def step(self, action):
-		obs, reward, _, info = self.env.step(action.copy())
-		obs = obs.astype(np.float32)
+		obs, reward, _, _, info = self.env.step(action.copy())
 		info['success'] = info['solved']
 		return obs, reward, False, info
 
@@ -48,7 +50,8 @@ def make_env(cfg):
 		raise ValueError('Unknown task:', cfg.task)
 	assert cfg.obs == 'state', 'This task only supports state observations.'
 	import myosuite
-	env = gym.make(MYOSUITE_TASKS[cfg.task])
+	from myosuite.utils import gym as gym_utils
+	env = gym_utils.make(MYOSUITE_TASKS[cfg.task])
 	env = MyoSuiteWrapper(env, cfg)
 	env = TimeLimit(env, max_episode_steps=100)
 	env.max_episode_steps = env._max_episode_steps
