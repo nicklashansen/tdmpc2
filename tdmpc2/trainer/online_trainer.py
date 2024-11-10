@@ -3,7 +3,6 @@ from time import time
 import numpy as np
 import torch
 from tensordict.tensordict import TensorDict
-
 from trainer.base import Trainer
 
 
@@ -32,6 +31,7 @@ class OnlineTrainer(Trainer):
 			if self.cfg.save_video:
 				self.logger.video.init(self.env, enabled=(i==0))
 			while not done:
+				torch.compiler.cudagraph_mark_step_begin()
 				action = self.agent.act(obs, t0=t==0, eval_mode=True)
 				obs, reward, done, info = self.env.step(action)
 				ep_reward += reward
@@ -57,18 +57,17 @@ class OnlineTrainer(Trainer):
 			action = torch.full_like(self.env.rand_act(), float('nan'))
 		if reward is None:
 			reward = torch.tensor(float('nan'))
-		td = TensorDict(dict(
+		td = TensorDict(
 			obs=obs,
 			action=action.unsqueeze(0),
 			reward=reward.unsqueeze(0),
-		), batch_size=(1,))
+		batch_size=(1,))
 		return td
 
 	def train(self):
 		"""Train a TD-MPC2 agent."""
-		train_metrics, done, eval_next = {}, True, True
+		train_metrics, done, eval_next = {}, True, False
 		while self._step <= self.cfg.steps:
-
 			# Evaluate agent periodically
 			if self._step % self.cfg.eval_freq == 0:
 				eval_next = True
@@ -113,5 +112,5 @@ class OnlineTrainer(Trainer):
 				train_metrics.update(_train_metrics)
 
 			self._step += 1
-	
+
 		self.logger.finish(self.agent)

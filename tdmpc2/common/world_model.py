@@ -1,11 +1,10 @@
 from copy import deepcopy
 
-import numpy as np
 import torch
 import torch.nn as nn
 
 from common import layers, math, init
-
+from tensordict.nn import TensorDictParams
 
 class WorldModel(nn.Module):
 	"""
@@ -18,7 +17,7 @@ class WorldModel(nn.Module):
 		self.cfg = cfg
 		if cfg.multitask:
 			self._task_emb = nn.Embedding(len(cfg.tasks), cfg.task_dim, max_norm=1)
-			self._action_masks = torch.zeros(len(cfg.tasks), cfg.action_dim)
+			self.register_buffer("_action_masks", torch.zeros(len(cfg.tasks), cfg.action_dim))
 			for i in range(len(cfg.tasks)):
 				self._action_masks[i, :cfg.action_dims[i]] = 1.
 		self._encoder = layers.enc(cfg)
@@ -27,26 +26,43 @@ class WorldModel(nn.Module):
 		self._pi = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 2*cfg.action_dim)
 		self._Qs = layers.Ensemble([layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1), dropout=cfg.dropout) for _ in range(cfg.num_q)])
 		self.apply(init.weight_init)
-		init.zero_([self._reward[-1].weight, self._Qs.params[-2]])
-		self._target_Qs = deepcopy(self._Qs).requires_grad_(False)
-		self.log_std_min = torch.tensor(cfg.log_std_min)
-		self.log_std_dif = torch.tensor(cfg.log_std_max) - self.log_std_min
+		init.zero_([self._reward[-1].weight, self._Qs.params["2", "weight"]])
+
+		self.register_buffer("log_std_min", torch.tensor(cfg.log_std_min))
+		self.register_buffer("log_std_dif", torch.tensor(cfg.log_std_max) - self.log_std_min)
+		self.init()
+
+	def init(self):
+		# Create params
+		self._detach_Qs_params = TensorDictParams(self._Qs.params.data, no_convert=True)
+		self._target_Qs_params = TensorDictParams(self._Qs.params.data.clone(), no_convert=True)
+
+		# Create modules
+		with self._detach_Qs_params.data.to("meta").to_module(self._Qs.module):
+			self._detach_Qs = deepcopy(self._Qs)
+			self._target_Qs = deepcopy(self._Qs)
+
+		# Assign params to modules
+		self._detach_Qs.params = self._detach_Qs_params
+		self._target_Qs.params = self._target_Qs_params
+
+	def __repr__(self):
+		repr = 'TD-MPC2 World Model\n'
+		modules = ['Encoder', 'Dynamics', 'Reward', 'Policy prior', 'Q-functions']
+		for i, m in enumerate([self._encoder, self._dynamics, self._reward, self._pi, self._Qs]):
+			repr += f"{modules[i]}: {m}\n"
+		repr += "Learnable parameters: {:,}".format(self.total_params)
+		return repr
 
 	@property
 	def total_params(self):
 		return sum(p.numel() for p in self.parameters() if p.requires_grad)
-		
+
 	def to(self, *args, **kwargs):
-		"""
-		Overriding `to` method to also move additional tensors to device.
-		"""
 		super().to(*args, **kwargs)
-		if self.cfg.multitask:
-			self._action_masks = self._action_masks.to(*args, **kwargs)
-		self.log_std_min = self.log_std_min.to(*args, **kwargs)
-		self.log_std_dif = self.log_std_dif.to(*args, **kwargs)
+		self.init()
 		return self
-	
+
 	def train(self, mode=True):
 		"""
 		Overriding `train` method to keep target Q-networks in eval mode.
@@ -55,26 +71,12 @@ class WorldModel(nn.Module):
 		self._target_Qs.train(False)
 		return self
 
-	def track_q_grad(self, mode=True):
-		"""
-		Enables/disables gradient tracking of Q-networks.
-		Avoids unnecessary computation during policy optimization.
-		This method also enables/disables gradients for task embeddings.
-		"""
-		for p in self._Qs.parameters():
-			p.requires_grad_(mode)
-		if self.cfg.multitask:
-			for p in self._task_emb.parameters():
-				p.requires_grad_(mode)
-
 	def soft_update_target_Q(self):
 		"""
 		Soft-update target Q-networks using Polyak averaging.
 		"""
-		with torch.no_grad():
-			for p, p_target in zip(self._Qs.parameters(), self._target_Qs.parameters()):
-				p_target.data.lerp_(p.data, self.cfg.tau)
-	
+		self._target_Qs_params.lerp_(self._detach_Qs_params, self.cfg.tau)
+
 	def task_emb(self, x, task):
 		"""
 		Continuous task embedding for multi-task experiments.
@@ -109,7 +111,7 @@ class WorldModel(nn.Module):
 			z = self.task_emb(z, task)
 		z = torch.cat([z, a], dim=-1)
 		return self._dynamics(z)
-	
+
 	def reward(self, z, a, task):
 		"""
 		Predicts instantaneous (single-step) reward.
@@ -147,7 +149,7 @@ class WorldModel(nn.Module):
 
 		return mu, pi, log_pi, log_std
 
-	def Q(self, z, a, task, return_type='min', target=False):
+	def Q(self, z, a, task, return_type='min', target=False, detach=False):
 		"""
 		Predict state-action value.
 		`return_type` can be one of [`min`, `avg`, `all`]:
@@ -160,13 +162,21 @@ class WorldModel(nn.Module):
 
 		if self.cfg.multitask:
 			z = self.task_emb(z, task)
-			
+
 		z = torch.cat([z, a], dim=-1)
-		out = (self._target_Qs if target else self._Qs)(z)
+		if target:
+			qnet = self._target_Qs
+		elif detach:
+			qnet = self._detach_Qs
+		else:
+			qnet = self._Qs
+		out = qnet(z)
 
 		if return_type == 'all':
 			return out
 
-		Q1, Q2 = out[np.random.choice(self.cfg.num_q, 2, replace=False)]
-		Q1, Q2 = math.two_hot_inv(Q1, self.cfg), math.two_hot_inv(Q2, self.cfg)
-		return torch.min(Q1, Q2) if return_type == 'min' else (Q1 + Q2) / 2
+		qidx = torch.randperm(self.cfg.num_q, device=out.device)[:2]
+		Q = math.two_hot_inv(out[qidx], self.cfg)
+		if return_type == "min":
+			return Q.min(0).values
+		return Q.sum(0) / 2
