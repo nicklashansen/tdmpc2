@@ -103,11 +103,11 @@ class TDMPC2(torch.nn.Module):
 		if task is not None:
 			task = torch.tensor([task], device=self.device)
 		if self.cfg.mpc:
-			a = self.plan(obs, t0=t0, eval_mode=eval_mode, task=task)
+			action = self.plan(obs, t0=t0, eval_mode=eval_mode, task=task)
 		else:
 			z = self.model.encode(obs, task)
-			a = self.model.pi(z, task)[int(not eval_mode)][0]
-		return a.cpu()
+			action = self.model.pi(z, task)[int(not eval_mode)][0]
+		return action.cpu()
 
 	@torch.no_grad()
 	def _estimate_value(self, z, actions, task):
@@ -202,14 +202,17 @@ class TDMPC2(torch.nn.Module):
 		Returns:
 			float: Loss of the policy update.
 		"""
-		_, pis, log_pis, _ = self.model.pi(zs, task)
-		qs = self.model.Q(zs, pis, task, return_type='avg', detach=True)
+		_, actions, log_probs, action_probs = self.model.pi(zs, task)
+		qs = self.model.Q(zs, actions, task, return_type='avg', detach=True)
 		self.scale.update(qs[0])
 		qs = self.scale(qs)
 
 		# Loss is a weighted sum of Q-values
 		rho = torch.pow(self.cfg.rho, torch.arange(len(qs), device=self.device))
-		pi_loss = ((self.cfg.entropy_coef * log_pis - qs).mean(dim=(1,2)) * rho).mean()
+		if self.cfg.action == 'discrete':
+			pi_loss = ((action_probs * (self.cfg.entropy_coef * log_probs - qs)).mean(dim=(1,2)) * rho).mean()
+		else:
+			pi_loss = ((self.cfg.entropy_coef * log_probs - qs).mean(dim=(1,2)) * rho).mean()
 		pi_loss.backward()
 		pi_grad_norm = torch.nn.utils.clip_grad_norm_(self.model._pi.parameters(), self.cfg.grad_clip_norm)
 		self.pi_optim.step()

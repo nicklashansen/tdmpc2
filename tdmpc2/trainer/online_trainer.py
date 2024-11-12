@@ -54,7 +54,8 @@ class OnlineTrainer(Trainer):
 		else:
 			obs = obs.unsqueeze(0).cpu()
 		if action is None:
-			action = torch.full_like(self.env.rand_act(), float('nan'))
+			action_val = -1 if self.cfg.action == 'discrete' else float('nan')
+			action = torch.full_like(self.env.rand_act(), action_val)
 		if reward is None:
 			reward = torch.tensor(float('nan'))
 		td = TensorDict(

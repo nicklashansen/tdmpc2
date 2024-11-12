@@ -2,8 +2,9 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: dog-run
+task: cartpole-swingup
 obs: state
+action: discrete
 
 # evaluation
 checkpoint: ???
@@ -29,7 +30,7 @@ exp_name: default
 data_dir: ???
 
 # planning
-mpc: true
+mpc: false
 iterations: 6
 num_samples: 512
 num_elites: 64

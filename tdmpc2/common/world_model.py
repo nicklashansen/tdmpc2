@@ -2,9 +2,12 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions.categorical import Categorical
+from tensordict.nn import TensorDictParams
 
 from common import layers, math, init
-from tensordict.nn import TensorDictParams
+
 
 class WorldModel(nn.Module):
 	"""
@@ -23,7 +26,7 @@ class WorldModel(nn.Module):
 		self._encoder = layers.enc(cfg)
 		self._dynamics = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], cfg.latent_dim, act=layers.SimNorm(cfg))
 		self._reward = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1))
-		self._pi = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 2*cfg.action_dim)
+		self._pi = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 2*cfg.action_dim if cfg.action == 'continuous' else cfg.action_dim)
 		self._Qs = layers.Ensemble([layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1), dropout=cfg.dropout) for _ in range(cfg.num_q)])
 		self.apply(init.weight_init)
 		init.zero_([self._reward[-1].weight, self._Qs.params["2", "weight"]])
@@ -121,15 +124,12 @@ class WorldModel(nn.Module):
 		z = torch.cat([z, a], dim=-1)
 		return self._reward(z)
 
-	def pi(self, z, task):
+	def _continuous_pi(self, z, task):
 		"""
 		Samples an action from the policy prior.
 		The policy prior is a Gaussian distribution with
 		mean and (log) std predicted by a neural network.
 		"""
-		if self.cfg.multitask:
-			z = self.task_emb(z, task)
-
 		# Gaussian policy prior
 		mu, log_std = self._pi(z).chunk(2, dim=-1)
 		log_std = math.log_std(log_std, self.log_std_min, self.log_std_dif)
@@ -148,6 +148,41 @@ class WorldModel(nn.Module):
 		mu, pi, log_pi = math.squash(mu, pi, log_pi)
 
 		return mu, pi, log_pi, log_std
+
+	def _discrete_pi(self, z, task):
+		"""
+		Samples an action from the policy prior.
+		The policy prior is a categorical distribution
+		with logits predicted by a neural network.
+		"""
+		# Categorical policy prior
+		logits = self._pi(z)
+		policy_dist = Categorical(logits=logits)
+		action = policy_dist.sample()
+		action = math.int_to_one_hot(action, self.cfg.action_dim)
+
+		# Action probabilities for calculating the adapted soft-Q loss
+		action_probs = policy_dist.probs
+		log_prob = F.log_softmax(logits, dim=-1)
+
+		return action, action, log_prob, action_probs
+
+
+	def pi(self, z, task):
+		"""
+		Samples an action from the policy prior.
+		Policy can be either continuous (Gaussian) or discrete (categorical).
+		"""
+		if self.cfg.multitask:
+			z = self.task_emb(z, task)
+
+		if self.cfg.action == 'discrete':
+			return self._discrete_pi(z, task)
+		elif self.cfg.action == 'continuous':
+			return self._continuous_pi(z, task)
+		else:
+			raise NotImplementedError(f"Action space {self.cfg.action} not supported.")
+		
 
 	def Q(self, z, a, task, return_type='min', target=False, detach=False):
 		"""

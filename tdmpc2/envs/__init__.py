@@ -3,6 +3,7 @@ import warnings
 
 import gym
 
+from envs.wrappers.discrete import DiscreteWrapper
 from envs.wrappers.multitask import MultitaskWrapper
 from envs.wrappers.pixels import PixelWrapper
 from envs.wrappers.tensor import TensorWrapper
@@ -65,6 +66,7 @@ def make_env(cfg):
 		for fn in [make_dm_control_env, make_maniskill_env, make_metaworld_env, make_myosuite_env]:
 			try:
 				env = fn(cfg)
+				break
 			except ValueError:
 				pass
 		if env is None:
@@ -72,11 +74,13 @@ def make_env(cfg):
 		env = TensorWrapper(env)
 	if cfg.get('obs', 'state') == 'rgb':
 		env = PixelWrapper(cfg, env)
+	if cfg.get('action', 'discrete'):
+		env = DiscreteWrapper(env)
 	try: # Dict
 		cfg.obs_shape = {k: v.shape for k, v in env.observation_space.spaces.items()}
 	except: # Box
 		cfg.obs_shape = {cfg.get('obs', 'state'): env.observation_space.shape}
-	cfg.action_dim = env.action_space.shape[0]
+	cfg.action_dim = env.action_space.n if cfg.action == 'discrete' else env.action_space.shape[0]
 	cfg.episode_length = env.max_episode_steps
 	cfg.seed_steps = max(1000, 5*cfg.episode_length)
 	return env
