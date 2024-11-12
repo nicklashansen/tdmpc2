@@ -74,7 +74,7 @@ def make_env(cfg):
 		env = TensorWrapper(env)
 	if cfg.get('obs', 'state') == 'rgb':
 		env = PixelWrapper(cfg, env)
-	if cfg.get('action', 'discrete'):
+	if cfg.get('action', 'continuous') == 'discrete':
 		env = DiscreteWrapper(env)
 	try: # Dict
 		cfg.obs_shape = {k: v.shape for k, v in env.observation_space.spaces.items()}
