@@ -30,7 +30,7 @@ exp_name: default
 data_dir: ???
 
 # planning
-mpc: false
+mpc: true
 iterations: 6
 num_samples: 512
 num_elites: 64

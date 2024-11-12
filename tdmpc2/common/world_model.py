@@ -175,6 +175,7 @@ class WorldModel(nn.Module):
 		if z.dim() == 2:
 			# z (batch_size, latent_dim) -> (batch_size, action_dim, latent_dim)
 			z = z.unsqueeze(1).expand(-1, self.cfg.action_dim, -1)
+			actions = actions.repeat(z.shape[0], 1, 1)
 		elif z.dim() == 3:
 			# z (seq_len, batch_size, latent_dim) -> (seq_len, batch_size, action_dim, latent_dim)
 			z = z.unsqueeze(2).expand(-1, -1, self.cfg.action_dim, -1)
