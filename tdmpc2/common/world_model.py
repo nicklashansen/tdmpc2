@@ -156,16 +156,34 @@ class WorldModel(nn.Module):
 		with logits predicted by a neural network.
 		"""
 		# Categorical policy prior
-		logits = self._pi(z)
-		policy_dist = Categorical(logits=logits)
-		action = policy_dist.sample()
+		# logits = self._pi(z)
+		# policy_dist = Categorical(logits=logits)
+		# action = policy_dist.sample()
+		# action = math.int_to_one_hot(action, self.cfg.action_dim)
+
+		# # Action probabilities for calculating the adapted soft-Q loss
+		# action_probs = policy_dist.probs
+		# log_prob = F.log_softmax(logits, dim=-1)
+
+		# return action, action, log_prob, action_probs
+
+		# Argmax policy
+		# enumerate all possible one-hot actions
+		# and return the one with the highest Q-value
+		# for the given state.
+		actions = torch.eye(self.cfg.action_dim, device=z.device).unsqueeze(0)
+		if z.dim() == 2:
+			# z (batch_size, latent_dim) -> (batch_size, action_dim, latent_dim)
+			z = z.unsqueeze(1).expand(-1, self.cfg.action_dim, -1)
+		elif z.dim() == 3:
+			# z (seq_len, batch_size, latent_dim) -> (seq_len, batch_size, action_dim, latent_dim)
+			z = z.unsqueeze(2).expand(-1, -1, self.cfg.action_dim, -1)
+			actions = actions.unsqueeze(0).repeat(z.shape[0], z.shape[1], 1, 1)
+		Q = self.Q(z, actions, task, return_type='min')
+		action = Q.argmax(dim=-2)
 		action = math.int_to_one_hot(action, self.cfg.action_dim)
 
-		# Action probabilities for calculating the adapted soft-Q loss
-		action_probs = policy_dist.probs
-		log_prob = F.log_softmax(logits, dim=-1)
-
-		return action, action, log_prob, action_probs
+		return action, action, None, None
 
 
 	def pi(self, z, task):

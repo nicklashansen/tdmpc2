@@ -107,6 +107,8 @@ class TDMPC2(torch.nn.Module):
 		else:
 			z = self.model.encode(obs, task)
 			action = self.model.pi(z, task)[int(not eval_mode)][0]
+			if self.cfg.action == 'discrete':
+				action = action.squeeze(0) # TODO: this is a bit hacky
 		return action.cpu()
 
 	@torch.no_grad()
@@ -234,6 +236,8 @@ class TDMPC2(torch.nn.Module):
 			torch.Tensor: TD-target.
 		"""
 		pi = self.model.pi(next_z, task)[1]
+		if self.cfg.action == 'discrete':
+			pi = pi.squeeze(2) # TODO: this is a bit hacky
 		discount = self.discount[task].unsqueeze(-1) if self.cfg.multitask else self.discount
 		return reward + discount * self.model.Q(next_z, pi, task, return_type='min', target=True)
 
@@ -284,7 +288,10 @@ class TDMPC2(torch.nn.Module):
 		self.optim.zero_grad(set_to_none=True)
 
 		# Update policy
-		pi_loss, pi_grad_norm = self.update_pi(zs.detach(), task)
+		if self.cfg.action == 'continuous':
+			pi_loss, pi_grad_norm = self.update_pi(zs.detach(), task)
+		else:
+			pi_loss, pi_grad_norm = 0., 0.
 
 		# Update target Q-functions
 		self.model.soft_update_target_Q()

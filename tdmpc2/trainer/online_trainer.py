@@ -98,6 +98,11 @@ class OnlineTrainer(Trainer):
 				action = self.agent.act(obs, t0=len(self._tds)==1)
 			else:
 				action = self.env.rand_act()
+			if self.cfg.action == 'discrete':
+				# exploration schedule
+				# minimum 0.01, maximum 0.05, anneal over 20k steps
+				if torch.rand(1) < 0.01 + (0.05 - 0.01) * min(1, self._step / 20000):
+					action = self.env.rand_act()
 			obs, reward, done, info = self.env.step(action)
 			self._tds.append(self.to_td(obs, action, reward))
 
