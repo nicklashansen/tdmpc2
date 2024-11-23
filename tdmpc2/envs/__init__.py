@@ -60,9 +60,13 @@ def make_env(cfg):
 	gym.logger.set_level(40)
 	if cfg.multitask:
 		env = make_multitask_env(cfg)
-
 	else:
 		env = None
+		if cfg.task.startswith('discrete-'):
+			discrete = True
+			cfg.task = cfg.task.replace('discrete-', '')
+		else:
+			discrete = False
 		for fn in [make_dm_control_env, make_maniskill_env, make_metaworld_env, make_myosuite_env]:
 			try:
 				env = fn(cfg)
@@ -72,15 +76,18 @@ def make_env(cfg):
 		if env is None:
 			raise ValueError(f'Failed to make environment "{cfg.task}": please verify that dependencies are installed and that the task exists.')
 		env = TensorWrapper(env)
+		if discrete:
+			env = DiscreteWrapper(env)
 	if cfg.get('obs', 'state') == 'rgb':
 		env = PixelWrapper(cfg, env)
-	if cfg.get('action', 'continuous') == 'discrete':
-		env = DiscreteWrapper(env)
 	try: # Dict
 		cfg.obs_shape = {k: v.shape for k, v in env.observation_space.spaces.items()}
 	except: # Box
 		cfg.obs_shape = {cfg.get('obs', 'state'): env.observation_space.shape}
-	cfg.action_dim = env.action_space.n if cfg.action == 'discrete' else env.action_space.shape[0]
+	assert not isinstance(env.action_space, (gym.spaces.Dict, gym.spaces.MultiDiscrete)), \
+		'Dict and MultiDiscrete action spaces are not supported.'
+	cfg.action_space = 'discrete' if isinstance(env.action_space, gym.spaces.Discrete) else 'continuous'
+	cfg.action_dim = env.action_space.n if cfg.action_space == 'discrete' else env.action_space.shape[0]
 	cfg.episode_length = env.max_episode_steps
 	cfg.seed_steps = max(1000, 5*cfg.episode_length)
 	return env

@@ -26,7 +26,7 @@ class WorldModel(nn.Module):
 		self._encoder = layers.enc(cfg)
 		self._dynamics = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], cfg.latent_dim, act=layers.SimNorm(cfg))
 		self._reward = layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1))
-		self._pi = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 2*cfg.action_dim if cfg.action == 'continuous' else cfg.action_dim)
+		self._pi = layers.mlp(cfg.latent_dim + cfg.task_dim, 2*[cfg.mlp_dim], 2*cfg.action_dim if cfg.action_space == 'continuous' else cfg.action_dim)
 		self._Qs = layers.Ensemble([layers.mlp(cfg.latent_dim + cfg.action_dim + cfg.task_dim, 2*[cfg.mlp_dim], max(cfg.num_bins, 1), dropout=cfg.dropout) for _ in range(cfg.num_q)])
 		self.apply(init.weight_init)
 		init.zero_([self._reward[-1].weight, self._Qs.params["2", "weight"]])
@@ -155,37 +155,19 @@ class WorldModel(nn.Module):
 		The policy prior is a categorical distribution
 		with logits predicted by a neural network.
 		"""
+		assert task is None, "Discrete policy does not support multitask."
+
 		# Categorical policy prior
-		# logits = self._pi(z)
-		# policy_dist = Categorical(logits=logits)
-		# action = policy_dist.sample()
-		# action = math.int_to_one_hot(action, self.cfg.action_dim)
+		logits = self._pi(z)
+		policy_dist = Categorical(logits=logits)
+		
+		action = policy_dist.sample()
+		action_probs = policy_dist.probs
+		log_prob = F.log_softmax(logits, dim=-1)
 
-		# # Action probabilities for calculating the adapted soft-Q loss
-		# action_probs = policy_dist.probs
-		# log_prob = F.log_softmax(logits, dim=-1)
+		one_hot_action = math.int_to_one_hot(action, self.cfg.action_dim)
 
-		# return action, action, log_prob, action_probs
-
-		# Argmax policy
-		# enumerate all possible one-hot actions
-		# and return the one with the highest Q-value
-		# for the given state.
-		actions = torch.eye(self.cfg.action_dim, device=z.device).unsqueeze(0)
-		if z.dim() == 2:
-			# z (batch_size, latent_dim) -> (batch_size, action_dim, latent_dim)
-			z = z.unsqueeze(1).expand(-1, self.cfg.action_dim, -1)
-			actions = actions.repeat(z.shape[0], 1, 1)
-		elif z.dim() == 3:
-			# z (seq_len, batch_size, latent_dim) -> (seq_len, batch_size, action_dim, latent_dim)
-			z = z.unsqueeze(2).expand(-1, -1, self.cfg.action_dim, -1)
-			actions = actions.unsqueeze(0).repeat(z.shape[0], z.shape[1], 1, 1)
-		Q = self.Q(z, actions, task, return_type='min')
-		action = Q.argmax(dim=-2)
-		action = math.int_to_one_hot(action, self.cfg.action_dim)
-
-		return action, action, None, None
-
+		return action, one_hot_action, log_prob, action_probs
 
 	def pi(self, z, task):
 		"""
@@ -195,14 +177,13 @@ class WorldModel(nn.Module):
 		if self.cfg.multitask:
 			z = self.task_emb(z, task)
 
-		if self.cfg.action == 'discrete':
+		if self.cfg.action_space == 'discrete':
 			return self._discrete_pi(z, task)
-		elif self.cfg.action == 'continuous':
+		elif self.cfg.action_space == 'continuous':
 			return self._continuous_pi(z, task)
 		else:
 			raise NotImplementedError(f"Action space {self.cfg.action} not supported.")
 		
-
 	def Q(self, z, a, task, return_type='min', target=False, detach=False):
 		"""
 		Predict state-action value.

@@ -54,7 +54,7 @@ class OnlineTrainer(Trainer):
 		else:
 			obs = obs.unsqueeze(0).cpu()
 		if action is None:
-			action_val = -1 if self.cfg.action == 'discrete' else float('nan')
+			action_val = -1 if self.cfg.action_space == 'discrete' else float('nan')
 			action = torch.full_like(self.env.rand_act(), action_val)
 		if reward is None:
 			reward = torch.tensor(float('nan'))
@@ -98,7 +98,7 @@ class OnlineTrainer(Trainer):
 				action = self.agent.act(obs, t0=len(self._tds)==1)
 			else:
 				action = self.env.rand_act()
-			if self.cfg.action == 'discrete':
+			if self.cfg.action_space == 'discrete':
 				# exploration schedule
 				# minimum 0.01, maximum 0.05, anneal over 20k steps
 				if torch.rand(1) < 0.01 + (0.05 - 0.01) * min(1, self._step / 20000):

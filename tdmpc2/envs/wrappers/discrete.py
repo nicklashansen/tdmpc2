@@ -13,8 +13,7 @@ class DiscreteWrapper(gym.Wrapper):
 		super().__init__(env)
 		self.bins_per_dim = bins_per_dim
 		self.continuous_dims = self.env.action_space.shape[0]
-		# Bins at [-1, 0, 1] for each dimension
-		# Discrete actions include all possible combinations of these bins
+		# Equally spaced bins along each dimension
 		self.action_space = gym.spaces.Discrete(bins_per_dim ** self.continuous_dims)
 	
 	def rand_act(self):
@@ -23,7 +22,6 @@ class DiscreteWrapper(gym.Wrapper):
 	
 	def _discrete_to_continuous(self, action):
 		# Convert a discrete action to a continuous action
-		# action is a one-hot encoded tensor
 		action = torch.argmax(action)
 		action = action.item()
 		action = [action // self.bins_per_dim ** i % self.bins_per_dim for i in range(self.continuous_dims)]

@@ -1,4 +1,4 @@
-from collections import deque, defaultdict
+from collections import defaultdict
 from typing import Any, NamedTuple
 import dm_env
 import numpy as np

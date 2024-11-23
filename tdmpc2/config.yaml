@@ -2,9 +2,8 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: cartpole-swingup
+task: discrete-cartpole-swingup
 obs: state
-action: discrete
 
 # evaluation
 checkpoint: ???
@@ -80,6 +79,7 @@ task_title: ???
 multitask: ???
 tasks: ???
 obs_shape: ???
+action_space: ???
 action_dim: ???
 episode_length: ???
 obs_shapes: ???

@@ -107,7 +107,7 @@ class TDMPC2(torch.nn.Module):
 		else:
 			z = self.model.encode(obs, task)
 			action = self.model.pi(z, task)[int(not eval_mode)][0]
-			if self.cfg.action == 'discrete':
+			if self.cfg.action_space == 'discrete':
 				action = action.squeeze(0) # TODO: this is a bit hacky
 		return action.cpu()
 
@@ -122,7 +122,7 @@ class TDMPC2(torch.nn.Module):
 			discount_update = self.discount[torch.tensor(task)] if self.cfg.multitask else self.discount
 			discount = discount * discount_update
 		pi = self.model.pi(z, task)[1]
-		if self.cfg.action == 'discrete':
+		if self.cfg.action_space == 'discrete':
 			pi = pi.squeeze(1) # TODO: this is a bit hacky
 		return G + discount * self.model.Q(z, pi, task, return_type='avg')
 
@@ -147,18 +147,18 @@ class TDMPC2(torch.nn.Module):
 			_z = z.repeat(self.cfg.num_pi_trajs, 1)
 			for t in range(self.cfg.horizon-1):
 				action = self.model.pi(_z, task)[1]
-				if self.cfg.action == 'discrete':
+				if self.cfg.action_space == 'discrete':
 					action = action.squeeze(1)
 				pi_actions[t] = action
 				_z = self.model.next(_z, pi_actions[t], task)
 			action = self.model.pi(_z, task)[1]
-			if self.cfg.action == 'discrete':
+			if self.cfg.action_space == 'discrete':
 				action = action.squeeze(1)
 			pi_actions[-1] = action
 
 		# Initialize state and parameters
 		z = z.repeat(self.cfg.num_samples, 1)
-		if self.cfg.action == 'continuous':
+		if self.cfg.action_space == 'continuous':
 			mean = torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device)
 			std = torch.full((self.cfg.horizon, self.cfg.action_dim), self.cfg.max_std, dtype=torch.float, device=self.device)
 			if not t0:
@@ -168,7 +168,7 @@ class TDMPC2(torch.nn.Module):
 			actions[:, :self.cfg.num_pi_trajs] = pi_actions
 
 		# Random shooting
-		if self.cfg.action == 'discrete':
+		if self.cfg.action_space == 'discrete':
 			# Sample actions
 			actions_sample = torch.randint(0, self.cfg.action_dim, (self.cfg.horizon, self.cfg.num_samples-self.cfg.num_pi_trajs), device=actions.device)
 			actions[:, self.cfg.num_pi_trajs:] = math.int_to_one_hot(actions_sample, self.cfg.action_dim)
@@ -235,13 +235,24 @@ class TDMPC2(torch.nn.Module):
 			float: Loss of the policy update.
 		"""
 		_, actions, log_probs, action_probs = self.model.pi(zs, task)
+
+		if self.cfg.action_space == 'discrete':
+			actions = torch.eye(self.cfg.action_dim, device=zs.device).unsqueeze(0)
+			zs = zs.unsqueeze(2).expand(-1, -1, self.cfg.action_dim, -1)
+			actions = actions.unsqueeze(0).repeat(zs.shape[0], zs.shape[1], 1, 1)
+
 		qs = self.model.Q(zs, actions, task, return_type='avg', detach=True)
-		self.scale.update(qs[0])
+
+		if self.cfg.action_space == 'discrete':
+			qs = qs.squeeze(-1)
+			self.scale.update(torch.sum(action_probs*qs,dim=(1,2),keepdim=True)[0])
+		else:
+			self.scale.update(qs[0])
 		qs = self.scale(qs)
 
 		# Loss is a weighted sum of Q-values
 		rho = torch.pow(self.cfg.rho, torch.arange(len(qs), device=self.device))
-		if self.cfg.action == 'discrete':
+		if self.cfg.action_space == 'discrete':
 			pi_loss = ((action_probs * (self.cfg.entropy_coef * log_probs - qs)).mean(dim=(1,2)) * rho).mean()
 		else:
 			pi_loss = ((self.cfg.entropy_coef * log_probs - qs).mean(dim=(1,2)) * rho).mean()
@@ -266,7 +277,7 @@ class TDMPC2(torch.nn.Module):
 			torch.Tensor: TD-target.
 		"""
 		pi = self.model.pi(next_z, task)[1]
-		if self.cfg.action == 'discrete':
+		if self.cfg.action_space == 'discrete':
 			pi = pi.squeeze(2) # TODO: this is a bit hacky
 		discount = self.discount[task].unsqueeze(-1) if self.cfg.multitask else self.discount
 		return reward + discount * self.model.Q(next_z, pi, task, return_type='min', target=True)
@@ -318,10 +329,7 @@ class TDMPC2(torch.nn.Module):
 		self.optim.zero_grad(set_to_none=True)
 
 		# Update policy
-		if self.cfg.action == 'continuous':
-			pi_loss, pi_grad_norm = self.update_pi(zs.detach(), task)
-		else:
-			pi_loss, pi_grad_norm = 0., 0.
+		pi_loss, pi_grad_norm = self.update_pi(zs.detach(), task)
 
 		# Update target Q-functions
 		self.model.soft_update_target_Q()

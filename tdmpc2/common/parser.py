@@ -77,12 +77,6 @@ def parse_cfg(cfg: OmegaConf) -> OmegaConf:
 		cfg.task_dim = 0
 	cfg.tasks = TASK_SET.get(cfg.task, [cfg.task])
 
-	# Check action space compatibility
-	assert cfg.action in ['continuous', 'discrete'], \
-		f'Invalid action space {cfg.action}. Must be one of ["continuous", "discrete"]'
-	if cfg.action == 'discrete':
-		assert not cfg.multitask, 'Discrete actions are not supported in multi-task settings.'
-
 	# Check torch.compile compatibility
 	if cfg.get('compile', False):
 		assert cfg.obs == 'state', 'torch.compile only supports state observations at the moment.'
