@@ -9,9 +9,9 @@ dependencies:
   - glib=2.78.4
   - pip=24.0
   - python=3.9
-  - pytorch
+  - pytorch=2.6.0.dev20241112
   - pytorch-cuda=12.4
-  - torchvision
+  - torchvision=0.15.2
   - pip:
     - absl-py==2.1.0
     - "cython<3"
@@ -29,9 +29,10 @@ dependencies:
     - omegaconf==2.3.0
     - moviepy==1.0.3
     - mujoco==2.3.1
+    - mujoco-py==2.1.2.14
     - numpy==1.24.4
-    - tensordict-nightly
-    - torchrl-nightly
+    - tensordict-nightly==2024.11.14
+    - torchrl-nightly==2024.11.14
     - kornia==0.7.2
     - termcolor==2.4.0
     - tqdm==4.66.4
