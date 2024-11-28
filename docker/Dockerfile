@@ -16,30 +16,20 @@
 ##########################################
 
 # base image
-FROM nvidia/cudagl:11.3.1-devel-ubuntu20.04
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 ENV DEBIAN_FRONTEND=noninteractive
 
 # packages
 RUN apt-get -y update && \
-    apt-get install -y --no-install-recommends build-essential git nano rsync vim tree curl \
-    wget unzip htop tmux xvfb patchelf ca-certificates bash-completion libjpeg-dev libpng-dev \
-    ffmpeg cmake swig libssl-dev libcurl4-openssl-dev libopenmpi-dev python3-dev zlib1g-dev \
-    qtbase5-dev qtdeclarative5-dev libglib2.0-0 libglu1-mesa-dev libgl1-mesa-dev libvulkan1 \
-    libgl1-mesa-glx libosmesa6 libosmesa6-dev libglew-dev mesa-utils && \
+    apt-get install -y --no-install-recommends build-essential git nano rsync vim tree curl wget \
+    swig ffmpeg unzip htop tmux xvfb ca-certificates bash-completion libjpeg-dev libpng-dev \
+    libssl-dev libcurl4-openssl-dev libopenmpi-dev zlib1g-dev qtbase5-dev qtdeclarative5-dev \
+    libglib2.0-0 libglu1-mesa-dev libgl1-mesa-dev libvulkan1 libgl1-mesa-glx libosmesa6 \
+    libosmesa6-dev libglew-dev mesa-utils && \
     apt-get clean && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir /root/.ssh
-
-# miniconda
-RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
-    /bin/bash ~/miniconda.sh -b -p /opt/conda && \
-    rm ~/miniconda.sh && \
-    . /opt/conda/etc/profile.d/conda.sh && \
-    conda init && \
-    conda clean -ya
-ENV PATH /opt/conda/bin:$PATH
-SHELL ["/bin/bash", "-c"]
 
 # conda environment
 COPY nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json
@@ -48,7 +38,10 @@ RUN conda update conda && \
     conda env update -n base -f /root/environment.yaml && \
     rm /root/environment.yaml && \
     conda clean -ya && \
-    pip cache purge
+    pip cache purge && \
+    conda init
+SHELL ["/bin/bash", "-c"]
+RUN echo "cd /root" >> /root/.bashrc
 
 # mujoco 2.1.0
 ENV MUJOCO_GL egl
