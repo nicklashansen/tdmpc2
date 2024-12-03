@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from common import layers, math, init
+from tensordict import TensorDict
 from tensordict.nn import TensorDictParams
 
 class WorldModel(nn.Module):
@@ -131,9 +132,9 @@ class WorldModel(nn.Module):
 			z = self.task_emb(z, task)
 
 		# Gaussian policy prior
-		mu, log_std = self._pi(z).chunk(2, dim=-1)
+		mean, log_std = self._pi(z).chunk(2, dim=-1)
 		log_std = math.log_std(log_std, self.log_std_min, self.log_std_dif)
-		eps = torch.randn_like(mu)
+		eps = torch.randn_like(mean)
 
 		if self.cfg.multitask: # Mask out unused action dimensions
 			mu = mu * self._action_masks[task]
@@ -143,11 +144,23 @@ class WorldModel(nn.Module):
 		else: # No masking
 			action_dims = None
 
-		log_pi = math.gaussian_logprob(eps, log_std, size=action_dims)
-		pi = mu + eps * log_std.exp()
-		mu, pi, log_pi = math.squash(mu, pi, log_pi)
+		log_prob = math.gaussian_logprob(eps, log_std)
 
-		return mu, pi, log_pi, log_std
+		# Scale log probability by action dimensions
+		size = eps.shape[-1] if action_dims is None else action_dims
+		scaled_log_prob = log_prob * size
+
+		# Reparameterization trick
+		action = mean + eps * log_std.exp()
+		mean, action, log_prob = math.squash(mean, action, log_prob)
+
+		info = TensorDict({
+			"mean": mean,
+			"log_std": log_std,
+			"entropy": -log_prob,
+			"entropy_scale": self.cfg.entropy_coef * scaled_log_prob / log_prob,
+		})
+		return action, info
 
 	def Q(self, z, a, task, return_type='min', target=False, detach=False):
 		"""

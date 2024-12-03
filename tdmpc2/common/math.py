@@ -13,33 +13,30 @@ def log_std(x, low, dif):
 	return low + 0.5 * dif * (torch.tanh(x) + 1)
 
 
-def _gaussian_residual(eps, log_std):
-	return -0.5 * eps.pow(2) - log_std
-
-
-def _gaussian_logprob(residual):
-	log2pi = 1.8378770351409912
-	return residual - 0.5 * log2pi
-
-
-def gaussian_logprob(eps, log_std, size=None):
+def gaussian_logprob(eps, log_std):
 	"""Compute Gaussian log probability."""
-	residual = _gaussian_residual(eps, log_std).sum(-1, keepdim=True)
-	if size is None:
-		size = eps.shape[-1]
-	return _gaussian_logprob(residual) * size
-
-
-def _squash(pi):
-	return torch.log(F.relu(1 - pi.pow(2)) + 1e-6)
+	residual = -0.5 * eps.pow(2) - log_std
+	log_prob = residual - 0.9189385175704956
+	return log_prob.sum(-1, keepdim=True)
 
 
 def squash(mu, pi, log_pi):
 	"""Apply squashing function."""
 	mu = torch.tanh(mu)
 	pi = torch.tanh(pi)
-	log_pi -= _squash(pi).sum(-1, keepdim=True)
+	squashed_pi = torch.log(F.relu(1 - pi.pow(2)) + 1e-6)
+	log_pi = log_pi - squashed_pi.sum(-1, keepdim=True)
 	return mu, pi, log_pi
+
+
+def int_to_one_hot(x, num_classes):
+	"""
+	Converts an integer tensor to a one-hot tensor.
+	Supports batched inputs.
+	"""
+	one_hot = torch.zeros(*x.shape, num_classes, device=x.device)
+	one_hot.scatter_(-1, x.unsqueeze(-1), 1)
+	return one_hot
 
 
 def symlog(x):

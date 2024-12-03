@@ -103,11 +103,12 @@ class TDMPC2(torch.nn.Module):
 		if task is not None:
 			task = torch.tensor([task], device=self.device)
 		if self.cfg.mpc:
-			a = self.plan(obs, t0=t0, eval_mode=eval_mode, task=task)
-		else:
-			z = self.model.encode(obs, task)
-			a = self.model.pi(z, task)[int(not eval_mode)][0]
-		return a.cpu()
+			return self.plan(obs, t0=t0, eval_mode=eval_mode, task=task).cpu()
+		z = self.model.encode(obs, task)
+		action, info = self.model.pi(z, task)
+		if eval_mode:
+			action = info["mean"]
+		return action[0].cpu()
 
 	@torch.no_grad()
 	def _estimate_value(self, z, actions, task):
@@ -119,7 +120,8 @@ class TDMPC2(torch.nn.Module):
 			G = G + discount * reward
 			discount_update = self.discount[torch.tensor(task)] if self.cfg.multitask else self.discount
 			discount = discount * discount_update
-		return G + discount * self.model.Q(z, self.model.pi(z, task)[1], task, return_type='avg')
+		action, _ = self.model.pi(z, task)
+		return G + discount * self.model.Q(z, action, task, return_type='avg')
 
 	@torch.no_grad()
 	def _plan(self, obs, t0=False, eval_mode=False, task=None):
@@ -141,9 +143,9 @@ class TDMPC2(torch.nn.Module):
 			pi_actions = torch.empty(self.cfg.horizon, self.cfg.num_pi_trajs, self.cfg.action_dim, device=self.device)
 			_z = z.repeat(self.cfg.num_pi_trajs, 1)
 			for t in range(self.cfg.horizon-1):
-				pi_actions[t] = self.model.pi(_z, task)[1]
+				pi_actions[t], _ = self.model.pi(_z, task)
 				_z = self.model.next(_z, pi_actions[t], task)
-			pi_actions[-1] = self.model.pi(_z, task)[1]
+			pi_actions[-1], _ = self.model.pi(_z, task)
 
 		# Initialize state and parameters
 		z = z.repeat(self.cfg.num_samples, 1)
@@ -202,20 +204,27 @@ class TDMPC2(torch.nn.Module):
 		Returns:
 			float: Loss of the policy update.
 		"""
-		_, pis, log_pis, _ = self.model.pi(zs, task)
-		qs = self.model.Q(zs, pis, task, return_type='avg', detach=True)
+		action, info = self.model.pi(zs, task)
+		qs = self.model.Q(zs, action, task, return_type='avg', detach=True)
 		self.scale.update(qs[0])
 		qs = self.scale(qs)
 
 		# Loss is a weighted sum of Q-values
 		rho = torch.pow(self.cfg.rho, torch.arange(len(qs), device=self.device))
-		pi_loss = ((self.cfg.entropy_coef * log_pis - qs).mean(dim=(1,2)) * rho).mean()
+		pi_loss = (-(info["entropy_scale"] * info["entropy"] + qs).mean(dim=(1,2)) * rho).mean()
 		pi_loss.backward()
 		pi_grad_norm = torch.nn.utils.clip_grad_norm_(self.model._pi.parameters(), self.cfg.grad_clip_norm)
 		self.pi_optim.step()
 		self.pi_optim.zero_grad(set_to_none=True)
 
-		return pi_loss.detach(), pi_grad_norm
+		info = TensorDict({
+			"pi_loss": pi_loss,
+			"pi_grad_norm": pi_grad_norm,
+			"pi_entropy": info["entropy"],
+			"pi_entropy_scale": info["entropy_scale"],
+			"pi_scale": self.scale.value,
+		})
+		return info
 
 	@torch.no_grad()
 	def _td_target(self, next_z, reward, task):
@@ -230,9 +239,9 @@ class TDMPC2(torch.nn.Module):
 		Returns:
 			torch.Tensor: TD-target.
 		"""
-		pi = self.model.pi(next_z, task)[1]
+		action, _ = self.model.pi(next_z, task)
 		discount = self.discount[task].unsqueeze(-1) if self.cfg.multitask else self.discount
-		return reward + discount * self.model.Q(next_z, pi, task, return_type='min', target=True)
+		return reward + discount * self.model.Q(next_z, action, task, return_type='min', target=True)
 
 	def _update(self, obs, action, reward, task=None):
 		# Compute targets
@@ -281,23 +290,22 @@ class TDMPC2(torch.nn.Module):
 		self.optim.zero_grad(set_to_none=True)
 
 		# Update policy
-		pi_loss, pi_grad_norm = self.update_pi(zs.detach(), task)
+		pi_info = self.update_pi(zs.detach(), task)
 
 		# Update target Q-functions
 		self.model.soft_update_target_Q()
 
 		# Return training statistics
 		self.model.eval()
-		return TensorDict({
+		info = TensorDict({
 			"consistency_loss": consistency_loss,
 			"reward_loss": reward_loss,
 			"value_loss": value_loss,
-			"pi_loss": pi_loss,
 			"total_loss": total_loss,
 			"grad_norm": grad_norm,
-			"pi_grad_norm": pi_grad_norm,
-			"pi_scale": self.scale.value,
-		}).detach().mean()
+		})
+		info.update(pi_info)
+		return info.detach().mean()
 
 	def update(self, buffer):
 		"""
