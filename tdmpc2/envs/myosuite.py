@@ -1,6 +1,6 @@
 import numpy as np
-import gym
-from envs.wrappers.time_limit import TimeLimit
+import gymnasium as gym
+from envs.wrappers.timeout import Timeout
 
 
 MYOSUITE_TASKS = {
@@ -53,6 +53,6 @@ def make_env(cfg):
 	from myosuite.utils import gym as gym_utils
 	env = gym_utils.make(MYOSUITE_TASKS[cfg.task])
 	env = MyoSuiteWrapper(env, cfg)
-	env = TimeLimit(env, max_episode_steps=100)
+	env = Timeout(env, max_episode_steps=100)
 	env.max_episode_steps = env._max_episode_steps
 	return env

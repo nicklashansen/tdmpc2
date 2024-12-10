@@ -1,6 +1,6 @@
 import numpy as np
 import gym
-from envs.wrappers.time_limit import TimeLimit
+from envs.wrappers.timeout import Timeout
 
 from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
@@ -47,6 +47,6 @@ def make_env(cfg):
 	assert cfg.obs == 'state', 'This task only supports state observations.'
 	env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[env_id](seed=cfg.seed)
 	env = MetaWorldWrapper(env, cfg)
-	env = TimeLimit(env, max_episode_steps=100)
+	env = Timeout(env, max_episode_steps=100)
 	env.max_episode_steps = env._max_episode_steps
 	return env
