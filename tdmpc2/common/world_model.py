@@ -137,7 +137,7 @@ class WorldModel(nn.Module):
 		eps = torch.randn_like(mean)
 
 		if self.cfg.multitask: # Mask out unused action dimensions
-			mu = mu * self._action_masks[task]
+			mean = mean * self._action_masks[task]
 			log_std = log_std * self._action_masks[task]
 			eps = eps * self._action_masks[task]
 			action_dims = self._action_masks.sum(-1)[task].unsqueeze(-1)
