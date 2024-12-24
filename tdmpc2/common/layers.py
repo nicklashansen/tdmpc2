@@ -15,7 +15,11 @@ class Ensemble(nn.Module):
 		self.params = from_modules(*modules, as_module=True)
 		with self.params[0].data.to("meta").to_module(modules[0]):
 			self.module = deepcopy(modules[0])
-		self._repr = str(modules)
+		self._repr = str(modules[0])
+		self._n = len(modules)
+
+	def __len__(self):
+		return self._n
 
 	def _call(self, params, *args, **kwargs):
 		with params.to_module(self.module):
@@ -25,7 +29,7 @@ class Ensemble(nn.Module):
 		return torch.vmap(self._call, (0, None), randomness="different")(self.params, *args, **kwargs)
 
 	def __repr__(self):
-		return 'Vectorized ' + self._repr
+		return f'Vectorized {len(self)}x ' + self._repr
 
 
 class ShiftAug(nn.Module):

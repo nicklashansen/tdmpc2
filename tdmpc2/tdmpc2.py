@@ -226,7 +226,7 @@ class TDMPC2(torch.nn.Module):
 
 		# Loss is a weighted sum of Q-values
 		rho = torch.pow(self.cfg.rho, torch.arange(len(qs), device=self.device))
-		pi_loss = (-(info["entropy_scale"] * info["entropy"] + qs).mean(dim=(1,2)) * rho).mean()
+		pi_loss = (-(self.cfg.entropy_coef * info["scaled_entropy"] + qs).mean(dim=(1,2)) * rho).mean()
 		pi_loss.backward()
 		pi_grad_norm = torch.nn.utils.clip_grad_norm_(self.model._pi.parameters(), self.cfg.grad_clip_norm)
 		self.pi_optim.step()
@@ -236,7 +236,7 @@ class TDMPC2(torch.nn.Module):
 			"pi_loss": pi_loss,
 			"pi_grad_norm": pi_grad_norm,
 			"pi_entropy": info["entropy"],
-			"pi_entropy_scale": info["entropy_scale"],
+			"pi_scaled_entropy": info["scaled_entropy"],
 			"pi_scale": self.scale.value,
 		})
 		return info
