@@ -77,9 +77,4 @@ def parse_cfg(cfg: OmegaConf) -> OmegaConf:
 		cfg.task_dim = 0
 	cfg.tasks = TASK_SET.get(cfg.task, [cfg.task])
 
-	# Check torch.compile compatibility
-	if cfg.get('compile', False):
-		assert cfg.obs == 'state', 'torch.compile only supports state observations at the moment.'
-		assert not cfg.multitask, 'torch.compile does not support multitask training at the moment.'
-
 	return cfg_to_dataclass(cfg)
