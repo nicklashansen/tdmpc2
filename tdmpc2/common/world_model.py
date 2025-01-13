@@ -44,7 +44,10 @@ class WorldModel(nn.Module):
 			self._target_Qs = deepcopy(self._Qs)
 
 		# Assign params to modules
+		# We do this strange assignment to avoid having duplicated tensors in the state-dict -- working on a better API for this
+		delattr(self._detach_Qs, "params")
 		self._detach_Qs.__dict__["params"] = self._detach_Qs_params
+		delattr(self._target_Qs, "params")
 		self._target_Qs.__dict__["params"] = self._target_Qs_params
 
 	def __repr__(self):

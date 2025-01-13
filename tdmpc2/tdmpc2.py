@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn.functional as F
 
@@ -6,6 +8,7 @@ from common.scale import RunningScale
 from common.world_model import WorldModel
 from tensordict import TensorDict
 
+torch.set_default_device(os.getenv("TDMPC2_DEFAULT_DEVICE", "cuda:0"))
 
 class TDMPC2(torch.nn.Module):
 	"""
@@ -17,7 +20,7 @@ class TDMPC2(torch.nn.Module):
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
-		self.device = torch.device('cuda:0')
+		self.device = torch.get_default_device()
 		self.model = WorldModel(cfg).to(self.device)
 		self.optim = torch.optim.Adam([
 			{'params': self.model._encoder.parameters(), 'lr': self.cfg.lr*self.cfg.enc_lr_scale},
@@ -32,7 +35,7 @@ class TDMPC2(torch.nn.Module):
 		self.scale = RunningScale(cfg)
 		self.cfg.iterations += 2*int(cfg.action_dim >= 20) # Heuristic for large action spaces
 		self.discount = torch.tensor(
-			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='cuda:0'
+			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device=torch.get_default_device()
 		) if self.cfg.multitask else self._get_discount(cfg.episode_length)
 		self._prev_mean = torch.nn.Buffer(torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device))
 		if cfg.compile:
@@ -82,44 +85,41 @@ class TDMPC2(torch.nn.Module):
 		Args:
 			fp (str or dict): Filepath or state dict to load.
 		"""
-		state_dict = fp if isinstance(fp, dict) else torch.load(fp)
+		state_dict = fp if isinstance(fp, dict) else torch.load(fp, map_location=torch.get_default_device())
 		state_dict = state_dict["model"] if "model" in state_dict else state_dict
-		# parameter list '0.0.weight', '0.0.bias', '0.0.ln.weight', '0.0.ln.bias', '0.1.weight', '0.1.bias', '0.1.ln.weight', '0.1.ln.bias', '0.2.weight', '0.2.bias'
-		detach = None
-		#state_dict.update({key.replace("_Qs", "_detach_Qs"): val for key, val in state_dict.items() if "_Qs" in key})
 		def load_sd_hook(model, local_state_dict, prefix, *args):
-			nonlocal detach
-			name_map = {str(i): name for i, name in enumerate(['0.weight', '0.bias', '0.ln.weight', '0.ln.bias', '1.weight', '1.bias', '1.ln.weight', '1.ln.bias', '2.weight', '2.bias'])}
-			print("name_map", name_map)
+			name_map = [
+				"weight", "bias", "ln.weight", "ln.bias",
+			]
+			print("Listing state dict keys (from disk)")
+			for k in list(local_state_dict.keys()):
+				print("\t", k)
+
 			sd = model.state_dict()
-			print("new state dict keys", list(sd.keys()))
-			print("loading state dict keys", list(local_state_dict.keys()))
+			print("Listing dest state dict keys")
+			for k in list(sd.keys()):
+				print("\t", k)
+
+			print("Maps:")
 			new_sd = dict(sd)
-			for cur_prefix in (prefix, "_target"+prefix):
+			for cur_prefix in (prefix, "_target"+prefix[:-1]+"_"):
 				for key, val in list(local_state_dict.items()):
-					if not key.startswith(cur_prefix):
+					if not key.startswith(cur_prefix[:-1]):
 						continue
-					new_key = name_map[key[len(cur_prefix + "params."):]]
-					new_key = cur_prefix + 'params.' + new_key
-					print(key, '-->', new_key)
+					num = key[len(cur_prefix + "params."):]
+					new_key = str(int(num) // 4) + "." + name_map[int(num) % 4]
+					new_total_key = cur_prefix + 'params.' + new_key
+					print("\t", key, '-->', new_total_key)
 					del local_state_dict[key]
-					new_sd[new_key] = val
+					new_sd[new_total_key] = val
+					if not cur_prefix.startswith("_target"):
+						new_total_key = "_detach" + cur_prefix[:-1] + "_" + 'params.' + new_key
+						print("\t", 'DETACH', key, '-->', new_total_key)
+						new_sd[new_total_key] = val
 			local_state_dict.update(new_sd)
-			detach = {"_detach"+key: val for key, val in new_sd.items() if key.startswith(prefix)}
-			state_dict.update(detach)
-			#detach = {key.replace(".params", "_params"): val for key, val in new_sd.items()}
-			#state_dict.update(detach)
 			return local_state_dict
 		load_sd_hook(self.model, state_dict, "_Qs.")
-		#def load_sd_hook_detach(model, state_dict, prefix, *args):
-		#	print('here')
-		#	state_dict.update(detach)
-		#	return state_dict
-		#self.model._Qs.register_load_state_dict_pre_hook(load_sd_hook)
-		#self.model._detach_Qs.register_load_state_dict_pre_hook(load_sd_hook_detach)
-		print("state_dict (new)", TensorDict(self.model.state_dict()))
-		print("state_dict (existing)", TensorDict(state_dict))
-		print('diff', set(TensorDict(self.model.state_dict()).keys()).symmetric_difference(set(TensorDict(state_dict).keys())))
+		assert not set(TensorDict(self.model.state_dict()).keys()).symmetric_difference(set(TensorDict(state_dict).keys()))
 		self.model.load_state_dict(state_dict)
 		return
 
