@@ -44,8 +44,8 @@ class WorldModel(nn.Module):
 			self._target_Qs = deepcopy(self._Qs)
 
 		# Assign params to modules
-		self._detach_Qs.params = self._detach_Qs_params
-		self._target_Qs.params = self._target_Qs_params
+		self._detach_Qs.__dict__["params"] = self._detach_Qs_params
+		self._target_Qs.__dict__["params"] = self._target_Qs_params
 
 	def __repr__(self):
 		repr = 'TD-MPC2 World Model\n'
