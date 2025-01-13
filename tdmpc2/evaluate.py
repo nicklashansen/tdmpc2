@@ -29,7 +29,7 @@ def evaluate(cfg: dict):
 		`eval_episodes`: number of episodes to evaluate on per task (default: 10)
 		`save_video`: whether to save a video of the evaluation (default: True)
 		`seed`: random seed (default: 1)
-	
+
 	See config.yaml for a full list of args.
 
 	Example usage:
@@ -57,7 +57,7 @@ def evaluate(cfg: dict):
 	agent = TDMPC2(cfg)
 	assert os.path.exists(cfg.checkpoint), f'Checkpoint {cfg.checkpoint} not found! Must be a valid filepath.'
 	agent.load(cfg.checkpoint)
-	
+
 	# Evaluate
 	if cfg.multitask:
 		print(colored(f'Evaluating agent on {len(cfg.tasks)} tasks:', 'yellow', attrs=['bold']))
