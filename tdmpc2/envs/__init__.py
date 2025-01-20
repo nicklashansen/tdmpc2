@@ -9,8 +9,11 @@ from envs.wrappers.tensor import TensorWrapper
 def missing_dependencies(task):
 	raise ValueError(f'Missing dependencies for task {task}; install dependencies to use this environment.')
 
+
+from envs.dmcontrol import make_env as make_dm_control_env
+
 try:
-	from envs.dmcontrol import make_env as make_dm_control_env
+	pass
 except:
 	make_dm_control_env = missing_dependencies
 try:
@@ -64,7 +67,8 @@ def make_env(cfg):
 		for fn in [make_dm_control_env, make_maniskill_env, make_metaworld_env, make_myosuite_env]:
 			try:
 				env = fn(cfg)
-			except ValueError:
+			except ValueError as err:
+				print(err)
 				pass
 		if env is None:
 			raise ValueError(f'Failed to make environment "{cfg.task}": please verify that dependencies are installed and that the task exists.')

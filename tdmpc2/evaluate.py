@@ -1,5 +1,5 @@
 import os
-os.environ['MUJOCO_GL'] = 'egl'
+os.environ['MUJOCO_GL'] = os.getenv("MUJOCO_GL", 'egl')
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -29,7 +29,7 @@ def evaluate(cfg: dict):
 		`eval_episodes`: number of episodes to evaluate on per task (default: 10)
 		`save_video`: whether to save a video of the evaluation (default: True)
 		`seed`: random seed (default: 1)
-	
+
 	See config.yaml for a full list of args.
 
 	Example usage:
@@ -39,7 +39,8 @@ def evaluate(cfg: dict):
 		$ python evaluate.py task=dog-run checkpoint=/path/to/dog-1.pt save_video=true
 	```
 	"""
-	assert torch.cuda.is_available()
+	if torch.get_default_device().type == "cuda":
+		assert torch.cuda.is_available()
 	assert cfg.eval_episodes > 0, 'Must evaluate at least 1 episode.'
 	cfg = parse_cfg(cfg)
 	set_seed(cfg.seed)
@@ -57,7 +58,7 @@ def evaluate(cfg: dict):
 	agent = TDMPC2(cfg)
 	assert os.path.exists(cfg.checkpoint), f'Checkpoint {cfg.checkpoint} not found! Must be a valid filepath.'
 	agent.load(cfg.checkpoint)
-	
+
 	# Evaluate
 	if cfg.multitask:
 		print(colored(f'Evaluating agent on {len(cfg.tasks)} tasks:', 'yellow', attrs=['bold']))
