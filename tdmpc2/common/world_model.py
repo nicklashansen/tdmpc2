@@ -7,6 +7,7 @@ from common import layers, math, init
 from tensordict import TensorDict
 from tensordict.nn import TensorDictParams
 
+
 class WorldModel(nn.Module):
 	"""
 	TD-MPC2 implicit world model architecture.

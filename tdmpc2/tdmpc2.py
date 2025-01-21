@@ -1,5 +1,3 @@
-import os
-
 import torch
 import torch.nn.functional as F
 
@@ -8,7 +6,6 @@ from common.scale import RunningScale
 from common.world_model import WorldModel
 from tensordict import TensorDict
 
-torch.set_default_device(os.getenv("TDMPC2_DEFAULT_DEVICE", "cuda:0"))
 
 class TDMPC2(torch.nn.Module):
 	"""
@@ -20,7 +17,7 @@ class TDMPC2(torch.nn.Module):
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
-		self.device = torch.get_default_device()
+		self.device = torch.device('cuda:0')
 		self.model = WorldModel(cfg).to(self.device)
 		self.optim = torch.optim.Adam([
 			{'params': self.model._encoder.parameters(), 'lr': self.cfg.lr*self.cfg.enc_lr_scale},
@@ -35,7 +32,7 @@ class TDMPC2(torch.nn.Module):
 		self.scale = RunningScale(cfg)
 		self.cfg.iterations += 2*int(cfg.action_dim >= 20) # Heuristic for large action spaces
 		self.discount = torch.tensor(
-			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device=torch.get_default_device()
+			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='cuda:0'
 		) if self.cfg.multitask else self._get_discount(cfg.episode_length)
 		self._prev_mean = torch.nn.Buffer(torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device))
 		if cfg.compile:
@@ -91,16 +88,16 @@ class TDMPC2(torch.nn.Module):
 			name_map = [
 				"weight", "bias", "ln.weight", "ln.bias",
 			]
-			print("Listing state dict keys (from disk)")
-			for k in list(local_state_dict.keys()):
-				print("\t", k)
+			# print("Listing state dict keys (from disk)")
+			# for k in list(local_state_dict.keys()):
+				# print("\t", k)
 
 			sd = model.state_dict()
-			print("Listing dest state dict keys")
-			for k in list(sd.keys()):
-				print("\t", k)
+			# print("Listing dest state dict keys")
+			# for k in list(sd.keys()):
+				# print("\t", k)
 
-			print("Maps:")
+			# print("Maps:")
 			new_sd = dict(sd)
 			for cur_prefix in (prefix, "_target"+prefix[:-1]+"_"):
 				for key, val in list(local_state_dict.items()):
@@ -109,12 +106,12 @@ class TDMPC2(torch.nn.Module):
 					num = key[len(cur_prefix + "params."):]
 					new_key = str(int(num) // 4) + "." + name_map[int(num) % 4]
 					new_total_key = cur_prefix + 'params.' + new_key
-					print("\t", key, '-->', new_total_key)
+					# print("\t", key, '-->', new_total_key)
 					del local_state_dict[key]
 					new_sd[new_total_key] = val
 					if not cur_prefix.startswith("_target"):
 						new_total_key = "_detach" + cur_prefix[:-1] + "_" + 'params.' + new_key
-						print("\t", 'DETACH', key, '-->', new_total_key)
+						# print("\t", 'DETACH', key, '-->', new_total_key)
 						new_sd[new_total_key] = val
 			local_state_dict.update(new_sd)
 			return local_state_dict
