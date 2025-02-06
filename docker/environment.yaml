@@ -27,8 +27,8 @@ dependencies:
     - moviepy==1.0.3
     - mujoco==3.1.2
     - numpy==1.24.4
-    - tensordict-nightly==2024.11.14
-    - torchrl-nightly==2024.11.14
+    - tensordict-nightly==2025.1.1
+    - torchrl-nightly==2025.1.1
     - kornia==0.7.2
     - termcolor==2.4.0
     - tqdm==4.66.4
