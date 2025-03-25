@@ -1,5 +1,5 @@
 import os
-os.environ['MUJOCO_GL'] = os.getenv("MUJOCO_GL", 'egl')
+os.environ['MUJOCO_GL'] = os.getenv("MUJOCO_GL", 'glfw')
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -46,6 +46,9 @@ def evaluate(cfg: dict):
 	print(colored(f'Task: {cfg.task}', 'blue', attrs=['bold']))
 	print(colored(f'Model size: {cfg.get("model_size", "default")}', 'blue', attrs=['bold']))
 	print(colored(f'Checkpoint: {cfg.checkpoint}', 'blue', attrs=['bold']))
+	print("[evaluate.py] multitask check: ", cfg.obs_shapes)
+	print("#############################################################")
+	print("[evaluate.py] tasks: " + str(cfg.tasks))
 	if not cfg.multitask and ('mt80' in cfg.checkpoint or 'mt30' in cfg.checkpoint):
 		print(colored('Warning: single-task evaluation of multi-task models is not currently supported.', 'red', attrs=['bold']))
 		print(colored('To evaluate a multi-task model, use task=mt80 or task=mt30.', 'red', attrs=['bold']))
@@ -56,6 +59,7 @@ def evaluate(cfg: dict):
 	# Load agent
 	agent = TDMPC2(cfg)
 	assert os.path.exists(cfg.checkpoint), f'Checkpoint {cfg.checkpoint} not found! Must be a valid filepath.'
+	print("[evaluate.py ] before loading checkpoint ")
 	agent.load(cfg.checkpoint)
 	
 	# Evaluate

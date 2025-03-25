@@ -6,12 +6,12 @@ task: dog-run
 obs: state
 
 # evaluation
-checkpoint: ???
+checkpoint: /tdmpc2/checkpoint/mt80-1M.pt
 eval_episodes: 10
 eval_freq: 50000
 
 # training
-steps: 10_000_000
+steps: 10_000_00
 batch_size: 256
 reward_coef: 0.1
 value_coef: 0.1
@@ -24,9 +24,9 @@ tau: 0.01
 discount_denom: 5
 discount_min: 0.95
 discount_max: 0.995
-buffer_size: 1_000_000
+buffer_size: 1_000
 exp_name: default
-data_dir: ???
+data_dir: /tdmpc2/datasets/meta_world/mt30
 
 # planning
 mpc: true
@@ -62,8 +62,8 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: ???
-wandb_entity: ???
+wandb_project: "TD-MPC2"
+wandb_entity: "ameyjoshi1011-new-york-university"
 wandb_silent: false
 enable_wandb: true
 save_csv: true
@@ -74,15 +74,15 @@ save_agent: true
 seed: 1
 
 # convenience
-work_dir: ???
+work_dir: /tdmpc2/videos/
 task_title: ???
-multitask: ???
-tasks: ???
+multitask: True
+tasks: ['mw-assembly', 'mw-basketball', 'mw-button-press-topdown', 'mw-button-press-topdown-wall']
 obs_shape: ???
 action_dim: ???
 episode_length: ???
 obs_shapes: ???
-action_dims: ???
+action_dims: ???    
 episode_lengths: ???
 seed_steps: ???
 bin_size: ???

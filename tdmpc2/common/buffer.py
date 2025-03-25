@@ -51,12 +51,15 @@ class Buffer():
 		"""Initialize the replay buffer. Use the first episode to estimate storage requirements."""
 		print(f'Buffer capacity: {self._capacity:,}')
 		mem_free, _ = torch.cuda.mem_get_info()
+		print("memory_free: " + str(mem_free))
 		bytes_per_step = sum([
 				(v.numel()*v.element_size() if not isinstance(v, TensorDict) \
 				else sum([x.numel()*x.element_size() for x in v.values()])) \
 			for v in tds.values()
 		]) / len(tds)
+		print("bytes_per_step: " + str(bytes_per_step))
 		total_bytes = bytes_per_step*self._capacity
+		print("total_bytes: " + str(total_bytes))
 		print(f'Storage required: {total_bytes/1e9:.2f} GB')
 		# Heuristic: decide whether to use CUDA or CPU memory
 		storage_device = 'cuda:0' if 2.5*total_bytes < mem_free else 'cpu'
@@ -71,6 +74,7 @@ class Buffer():
 		Load a batch of episodes into the buffer. This is useful for loading data from disk,
 		and is more efficient than adding episodes one by one.
 		"""
+		print("[buffer.py} entering buffer load")
 		num_new_eps = len(td)
 		episode_idx = torch.arange(self._num_eps, self._num_eps+num_new_eps, dtype=torch.int64)
 		td['episode'] = episode_idx.unsqueeze(-1).expand(-1, td['reward'].shape[1])

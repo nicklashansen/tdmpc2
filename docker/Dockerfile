@@ -53,9 +53,15 @@ RUN mkdir -p /root/.mujoco && \
     rm mujoco210-linux-x86_64.tar.gz && \
     mv mujoco210 /root/.mujoco/mujoco210 && \
     mv mjkey.txt /root/.mujoco/mjkey.txt && \
-    find /root/.mujoco -uid 421709 -exec chown root:root {} \; && \
+    find /root/.mujoco -uid 421709 -exec chown root:root {} \;
+# Install mujoco-py
+RUN pip install "cython<3"
+
+RUN pip install -U 'mujoco-py<2.2,>=2.1' && \
     python -c "import mujoco_py"
 
+RUN pip install setuptools==65.5.0 pip==21
+RUN pip install wheel==0.38.0
 # gym
 RUN pip install gym==0.21.0
 

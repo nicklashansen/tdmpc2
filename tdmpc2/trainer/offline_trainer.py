@@ -7,7 +7,7 @@ from glob import glob
 import numpy as np
 import torch
 from tqdm import tqdm
-
+import gym
 from common.buffer import Buffer
 from trainer.base import Trainer
 
@@ -18,7 +18,7 @@ class OfflineTrainer(Trainer):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self._start_time = time()
-	
+		print(self.env)
 	def eval(self):
 		"""Evaluate a TD-MPC2 agent."""
 		results = dict()
