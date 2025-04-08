@@ -67,7 +67,7 @@ simnorm_dim: 8
 wandb_project: ???
 wandb_entity: ???
 wandb_silent: false
-disable_wandb: true
+enable_wandb: true
 save_csv: true
 
 # misc
@@ -88,3 +88,6 @@ action_dims: ???
 episode_lengths: ???
 seed_steps: ???
 bin_size: ???
+
+# speedups
+compile: False

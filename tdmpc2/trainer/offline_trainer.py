@@ -27,6 +27,7 @@ class OfflineTrainer(Trainer):
 			for _ in range(self.cfg.eval_episodes):
 				obs, done, ep_reward, t = self.env.reset(task_idx), False, 0, 0
 				while not done:
+					torch.compiler.cudagraph_mark_step_begin()
 					action = self.agent.act(obs, t0=t==0, eval_mode=True, task=task_idx)
 					obs, reward, done, info = self.env.step(action)
 					ep_reward += reward
@@ -37,20 +38,15 @@ class OfflineTrainer(Trainer):
 				f'episode_reward+{self.cfg.tasks[task_idx]}': np.nanmean(ep_rewards),
 				f'episode_success+{self.cfg.tasks[task_idx]}': np.nanmean(ep_successes),})
 		return results
-				
-	def train(self):
-		"""Train a TD-MPC2 agent."""
-		assert self.cfg.multitask and self.cfg.task in {'mt30', 'mt80'}, \
-			'Offline training only supports multitask training with mt30 or mt80 task sets.'
-
-		# Load data
-		assert self.cfg.task in self.cfg.data_dir, \
-			f'Expected data directory {self.cfg.data_dir} to contain {self.cfg.task}, ' \
-			f'please double-check your config.'
+	
+	def _load_dataset(self):
+		"""Load dataset for offline training."""
 		fp = Path(os.path.join(self.cfg.data_dir, '*.pt'))
 		fps = sorted(glob(str(fp)))
 		assert len(fps) > 0, f'No data found at {fp}'
 		print(f'Found {len(fps)} files in {fp}')
+		if len(fps) < (20 if self.cfg.task == 'mt80' else 4):
+			print(f'WARNING: expected 20 files for mt80 task set, 4 files for mt30 task set, found {len(fps)} files.')
 	
 		# Create buffer for sampling
 		_cfg = deepcopy(self.cfg)
@@ -59,14 +55,20 @@ class OfflineTrainer(Trainer):
 		_cfg.steps = _cfg.buffer_size
 		self.buffer = Buffer(_cfg)
 		for fp in tqdm(fps, desc='Loading data'):
-			td = torch.load(fp)
+			td = torch.load(fp, weights_only=False)
 			assert td.shape[1] == _cfg.episode_length, \
 				f'Expected episode length {td.shape[1]} to match config episode length {_cfg.episode_length}, ' \
 				f'please double-check your config.'
-			for i in range(len(td)):
-				self.buffer.add(td[i])
-		assert self.buffer.num_eps == self.buffer.capacity, \
-			f'Buffer has {self.buffer.num_eps} episodes, expected {self.buffer.capacity} episodes.'
+			self.buffer.load(td)
+		expected_episodes = _cfg.buffer_size // _cfg.episode_length
+		if self.buffer.num_eps != expected_episodes:
+			print(f'WARNING: buffer has {self.buffer.num_eps} episodes, expected {expected_episodes} episodes for {self.cfg.task} task set.')
+
+	def train(self):
+		"""Train a TD-MPC2 agent."""
+		assert self.cfg.multitask and self.cfg.task in {'mt30', 'mt80'}, \
+			'Offline training only supports multitask training with mt30 or mt80 task sets.'
+		self._load_dataset()
 		
 		print(f'Training agent for {self.cfg.steps} iterations...')
 		metrics = {}

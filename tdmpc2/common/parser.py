@@ -1,10 +1,29 @@
+import dataclasses
 import re
 from pathlib import Path
+from typing import Any
 
 import hydra
 from omegaconf import OmegaConf
 
 from common import MODEL_SIZE, TASK_SET
+
+
+def cfg_to_dataclass(cfg, frozen=False):
+	"""
+	Converts an OmegaConf config to a dataclass object.
+	This prevents graph breaks when used with torch.compile.
+	"""
+	cfg_dict = OmegaConf.to_container(cfg)
+	fields = []
+	for key, value in cfg_dict.items():
+		fields.append((key, Any, dataclasses.field(default_factory=lambda value_=value: value_)))
+	dataclass_name = "Config"
+	dataclass = dataclasses.make_dataclass(dataclass_name, fields, frozen=frozen)
+	def get(self, val, default=None):
+		return getattr(self, val, default)
+	dataclass.get = get
+	return dataclass()
 
 
 def parse_cfg(cfg: OmegaConf) -> OmegaConf:
@@ -53,9 +72,9 @@ def parse_cfg(cfg: OmegaConf) -> OmegaConf:
 	if cfg.multitask:
 		cfg.task_title = cfg.task.upper()
 		# Account for slight inconsistency in task_dim for the mt30 experiments
-		cfg.task_dim = 96 if cfg.task == 'mt80' or cfg.model_size in {1, 317} else 64
+		cfg.task_dim = 96 if cfg.task == 'mt80' or cfg.get('model_size', 5) in {1, 317} else 64
 	else:
 		cfg.task_dim = 0
 	cfg.tasks = TASK_SET.get(cfg.task, [cfg.task])
 
-	return cfg
+	return cfg_to_dataclass(cfg)

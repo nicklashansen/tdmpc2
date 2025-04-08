@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functorch import combine_state_for_ensemble
+from tensordict import from_modules
+from copy import deepcopy
 
 
 class Ensemble(nn.Module):
@@ -11,17 +12,25 @@ class Ensemble(nn.Module):
 
 	def __init__(self, modules, **kwargs):
 		super().__init__()
-		modules = nn.ModuleList(modules)
-		fn, params, _ = combine_state_for_ensemble(modules)
-		self.vmap = torch.vmap(fn, in_dims=(0, 0, None), randomness='different', **kwargs)
-		self.params = nn.ParameterList([nn.Parameter(p) for p in params])
-		self._repr = str(modules)
+		# combine_state_for_ensemble causes graph breaks
+		self.params = from_modules(*modules, as_module=True)
+		with self.params[0].data.to("meta").to_module(modules[0]):
+			self.module = deepcopy(modules[0])
+		self._repr = str(modules[0])
+		self._n = len(modules)
+
+	def __len__(self):
+		return self._n
+
+	def _call(self, params, *args, **kwargs):
+		with params.to_module(self.module):
+			return self.module(*args, **kwargs)
 
 	def forward(self, *args, **kwargs):
-		return self.vmap([p for p in self.params], (), *args, **kwargs)
+		return torch.vmap(self._call, (0, None), randomness="different")(self.params, *args, **kwargs)
 
 	def __repr__(self):
-		return 'Vectorized ' + self._repr
+		return f'Vectorized {len(self)}x ' + self._repr
 
 
 class ShiftAug(nn.Module):
@@ -32,13 +41,13 @@ class ShiftAug(nn.Module):
 	def __init__(self, pad=3):
 		super().__init__()
 		self.pad = pad
+		self.padding = tuple([self.pad] * 4)
 
 	def forward(self, x):
 		x = x.float()
 		n, _, h, w = x.size()
 		assert h == w
-		padding = tuple([self.pad] * 4)
-		x = F.pad(x, padding, 'replicate')
+		x = F.pad(x, self.padding, 'replicate')
 		eps = 1.0 / (h + 2 * self.pad)
 		arange = torch.linspace(-1.0 + eps, 1.0 - eps, h + 2 * self.pad, device=x.device, dtype=x.dtype)[:h]
 		arange = arange.unsqueeze(0).repeat(h, 1).unsqueeze(2)
@@ -59,7 +68,7 @@ class PixelPreprocess(nn.Module):
 		super().__init__()
 
 	def forward(self, x):
-		return x.div_(255.).sub_(0.5)
+		return x.div(255.).sub(0.5)
 
 
 class SimNorm(nn.Module):
@@ -67,17 +76,17 @@ class SimNorm(nn.Module):
 	Simplicial normalization.
 	Adapted from https://arxiv.org/abs/2204.00616.
 	"""
-	
+
 	def __init__(self, cfg):
 		super().__init__()
 		self.dim = cfg.simnorm_dim
-	
+
 	def forward(self, x):
 		shp = x.shape
 		x = x.view(*shp[:-1], -1, self.dim)
 		x = F.softmax(x, dim=-1)
 		return x.view(*shp)
-		
+
 	def __repr__(self):
 		return f"SimNorm(dim={self.dim})"
 
@@ -87,18 +96,20 @@ class NormedLinear(nn.Linear):
 	Linear layer with LayerNorm, activation, and optionally dropout.
 	"""
 
-	def __init__(self, *args, dropout=0., act=nn.Mish(inplace=True), **kwargs):
+	def __init__(self, *args, dropout=0., act=None, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.ln = nn.LayerNorm(self.out_features)
+		if act is None:
+			act = nn.Mish(inplace=False)
 		self.act = act
-		self.dropout = nn.Dropout(dropout, inplace=True) if dropout else None
+		self.dropout = nn.Dropout(dropout, inplace=False) if dropout else None
 
 	def forward(self, x):
 		x = super().forward(x)
 		if self.dropout:
 			x = self.dropout(x)
 		return self.act(self.ln(x))
-	
+
 	def __repr__(self):
 		repr_dropout = f", dropout={self.dropout.p}" if self.dropout else ""
 		return f"NormedLinear(in_features={self.in_features}, "\
@@ -130,9 +141,9 @@ def conv(in_shape, num_channels, act=None):
 	assert in_shape[-1] == 64 # assumes rgb observations to be 64x64
 	layers = [
 		ShiftAug(), PixelPreprocess(),
-		nn.Conv2d(in_shape[0], num_channels, 7, stride=2), nn.ReLU(inplace=True),
-		nn.Conv2d(num_channels, num_channels, 5, stride=2), nn.ReLU(inplace=True),
-		nn.Conv2d(num_channels, num_channels, 3, stride=2), nn.ReLU(inplace=True),
+		nn.Conv2d(in_shape[0], num_channels, 7, stride=2), nn.ReLU(inplace=False),
+		nn.Conv2d(num_channels, num_channels, 5, stride=2), nn.ReLU(inplace=False),
+		nn.Conv2d(num_channels, num_channels, 3, stride=2), nn.ReLU(inplace=False),
 		nn.Conv2d(num_channels, num_channels, 3, stride=1), nn.Flatten()]
 	if act:
 		layers.append(act)
@@ -151,3 +162,59 @@ def enc(cfg, out={}):
 		else:
 			raise NotImplementedError(f"Encoder for observation type {k} not implemented.")
 	return nn.ModuleDict(out)
+
+
+def api_model_conversion(target_state_dict, source_state_dict):
+	"""
+	Converts a checkpoint from our old API to the new torch.compile compatible API.
+	"""
+	# check whether checkpoint is already in the new format
+	if "_detach_Qs_params.0.weight" in source_state_dict:
+		return source_state_dict
+
+	name_map = ['weight', 'bias', 'ln.weight', 'ln.bias']
+	new_state_dict = dict()
+
+	# rename keys
+	for key, val in list(source_state_dict.items()):
+		if key.startswith('_Qs.'):
+			num = key[len('_Qs.params.'):]
+			new_key = str(int(num) // 4) + "." + name_map[int(num) % 4]
+			new_total_key = "_Qs.params." + new_key
+			del source_state_dict[key]
+			new_state_dict[new_total_key] = val
+			new_total_key = "_detach_Qs_params." + new_key
+			new_state_dict[new_total_key] = val
+		elif key.startswith('_target_Qs.'):
+			num = key[len('_target_Qs.params.'):]
+			new_key = str(int(num) // 4) + "." + name_map[int(num) % 4]
+			new_total_key = "_target_Qs_params." + new_key
+			del source_state_dict[key]
+			new_state_dict[new_total_key] = val
+
+	# add batch_size and device from target_state_dict to new_state_dict
+	for prefix in ('_Qs.', '_detach_Qs_', '_target_Qs_'):
+		for key in ('__batch_size', '__device'):
+			new_key = prefix + 'params.' + key
+			new_state_dict[new_key] = target_state_dict[new_key]
+
+	# check that every key in new_state_dict is in target_state_dict
+	for key in new_state_dict.keys():
+		assert key in target_state_dict, f"key {key} not in target_state_dict"
+	# check that all Qs keys in target_state_dict are in new_state_dict
+	for key in target_state_dict.keys():
+		if 'Qs' in key:
+			assert key in new_state_dict, f"key {key} not in new_state_dict"
+	# check that source_state_dict contains no Qs keys
+	for key in source_state_dict.keys():
+		assert 'Qs' not in key, f"key {key} contains 'Qs'"
+
+	# copy log_std_min and log_std_max from target_state_dict to new_state_dict
+	new_state_dict['log_std_min'] = target_state_dict['log_std_min']
+	new_state_dict['log_std_dif'] = target_state_dict['log_std_dif']
+	new_state_dict['_action_masks'] = target_state_dict['_action_masks']
+
+	# copy new_state_dict to source_state_dict
+	source_state_dict.update(new_state_dict)
+
+	return source_state_dict
