@@ -87,6 +87,8 @@ class OnlineTrainer(Trainer):
 					train_metrics.update(
 						episode_reward=torch.tensor([td['reward'] for td in self._tds[1:]]).sum(),
 						episode_success=info['success'],
+						episode_length=len(self._tds),
+						episode_terminated=info['terminated'],
 					)
 					train_metrics.update(self.common_metrics())
 					self.logger.log(train_metrics, 'train')

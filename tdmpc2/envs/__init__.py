@@ -9,10 +9,10 @@ from envs.wrappers.tensor import TensorWrapper
 def missing_dependencies(task):
 	raise ValueError(f'Missing dependencies for task {task}; install dependencies to use this environment.')
 
-# try:
-from envs.dmcontrol import make_env as make_dm_control_env
-# except:
-	# make_dm_control_env = missing_dependencies
+try:
+	from envs.dmcontrol import make_env as make_dm_control_env
+except:
+	make_dm_control_env = missing_dependencies
 try:
 	from envs.maniskill import make_env as make_maniskill_env
 except:
@@ -25,6 +25,10 @@ try:
 	from envs.myosuite import make_env as make_myosuite_env
 except:
 	make_myosuite_env = missing_dependencies
+try:
+	from envs.mujoco import make_env as make_mujoco_env
+except:
+	make_mujoco_env = missing_dependencies
 
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -61,7 +65,7 @@ def make_env(cfg):
 
 	else:
 		env = None
-		for fn in [make_dm_control_env, make_maniskill_env, make_metaworld_env, make_myosuite_env]:
+		for fn in [make_dm_control_env, make_maniskill_env, make_metaworld_env, make_myosuite_env, make_mujoco_env]:
 			try:
 				env = fn(cfg)
 			except ValueError:

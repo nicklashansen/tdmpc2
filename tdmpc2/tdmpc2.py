@@ -24,7 +24,7 @@ class TDMPC2(torch.nn.Module):
 			{'params': self.model._encoder.parameters(), 'lr': self.cfg.lr*self.cfg.enc_lr_scale},
 			{'params': self.model._dynamics.parameters()},
 			{'params': self.model._reward.parameters()},
-			{'params': self.model._terminated.parameters()},
+			{'params': self.model._termination.parameters()},
 			{'params': self.model._Qs.parameters()},
 			{'params': self.model._task_emb.parameters() if self.cfg.multitask else []
 			 }
@@ -36,6 +36,8 @@ class TDMPC2(torch.nn.Module):
 		self.discount = torch.tensor(
 			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='cuda:0'
 		) if self.cfg.multitask else self._get_discount(cfg.episode_length)
+		print('Episode length:', cfg.episode_length)
+		print('Discount factor:', self.discount)
 		self._prev_mean = torch.nn.Buffer(torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device))
 		if cfg.compile:
 			print('Compiling update function with torch.compile...')
@@ -122,17 +124,17 @@ class TDMPC2(torch.nn.Module):
 	def _estimate_value(self, z, actions, task):
 		"""Estimate value of a trajectory starting at latent state z and executing given actions."""
 		G, discount = 0, 1
-		terminated = torch.zeros(self.cfg.num_samples, 1, dtype=torch.float32, device=z.device)
+		termination = torch.zeros(self.cfg.num_samples, 1, dtype=torch.float32, device=z.device)
 		for t in range(self.cfg.horizon):
 			reward = math.two_hot_inv(self.model.reward(z, actions[t], task), self.cfg)
 			z = self.model.next(z, actions[t], task)
 
-			G = G + discount * (1-terminated) * reward
+			G = G + discount * (1-termination) * reward
 			discount_update = self.discount[torch.tensor(task)] if self.cfg.multitask else self.discount
 			discount = discount * discount_update
-			terminated = torch.clip(terminated + (self.model.terminated(z, task) > 0.5).float(), max=1.)
+			termination = torch.clip(termination + (self.model.termination(z, task) > 0.5).float(), max=1.)
 		action, _ = self.model.pi(z, task)
-		return G + discount * (1-terminated) * self.model.Q(z, action, task, return_type='avg')
+		return G + discount * (1-termination) * self.model.Q(z, action, task, return_type='avg')
 
 	@torch.no_grad()
 	def _plan(self, obs, t0=False, eval_mode=False, task=None):
@@ -278,7 +280,7 @@ class TDMPC2(torch.nn.Module):
 		_zs = zs[:-1]
 		qs = self.model.Q(_zs, action, task, return_type='all')
 		reward_preds = self.model.reward(_zs, action, task)
-		terminated_pred = self.model.terminated(zs[-1], task)
+		termination_pred = self.model.termination(zs[-1], task)
 
 		# Compute losses
 		reward_loss, value_loss = 0, 0
@@ -289,12 +291,12 @@ class TDMPC2(torch.nn.Module):
 
 		consistency_loss = consistency_loss / self.cfg.horizon
 		reward_loss = reward_loss / self.cfg.horizon
-		terminated_loss = F.binary_cross_entropy(terminated_pred, terminated[-1])
+		termination_loss = F.binary_cross_entropy(termination_pred, terminated[-1])
 		value_loss = value_loss / (self.cfg.horizon * self.cfg.num_q)
 		total_loss = (
 			self.cfg.consistency_coef * consistency_loss +
 			self.cfg.reward_coef * reward_loss +
-			self.cfg.terminated_coef * terminated_loss +
+			self.cfg.termination_coef * termination_loss +
 			self.cfg.value_coef * value_loss
 		)
 
@@ -316,6 +318,9 @@ class TDMPC2(torch.nn.Module):
 			"consistency_loss": consistency_loss,
 			"reward_loss": reward_loss,
 			"value_loss": value_loss,
+			"termination_loss": termination_loss,
+			"termination_mean": termination_pred.mean(),
+			"termination_mean_gt": terminated[-1].mean(),
 			"total_loss": total_loss,
 			"grad_norm": grad_norm,
 		})

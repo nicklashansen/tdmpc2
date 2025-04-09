@@ -16,7 +16,7 @@ steps: 10_000_000
 batch_size: 256
 reward_coef: 0.1
 value_coef: 0.1
-terminated_coef: 0.1
+termination_coef: 1
 consistency_coef: 20
 rho: 0.5
 lr: 3e-4
@@ -90,4 +90,4 @@ seed_steps: ???
 bin_size: ???
 
 # speedups
-compile: False
+compile: false
