@@ -184,10 +184,11 @@ class WorldModel(nn.Module):
 		`return_type` can be one of [`min`, `avg`, `all`]:
 			- `min`: return the minimum of two randomly subsampled Q-values.
 			- `avg`: return the average of two randomly subsampled Q-values.
+			- 'avg-all': return the average of all Q-values.
 			- `all`: return all Q-values.
 		`target` specifies whether to use the target Q-networks or not.
 		"""
-		assert return_type in {'min', 'avg', 'all'}
+		assert return_type in {'min', 'avg', 'avg-all', 'all'}
 
 		if self.cfg.multitask:
 			z = self.task_emb(z, task)
@@ -203,6 +204,10 @@ class WorldModel(nn.Module):
 
 		if return_type == 'all':
 			return out
+
+		if return_type == 'avg-all':
+			Q = math.two_hot_inv(out, self.cfg)
+			return Q.mean(0)
 
 		qidx = torch.randperm(self.cfg.num_q, device=out.device)[:2]
 		Q = math.two_hot_inv(out[qidx], self.cfg)

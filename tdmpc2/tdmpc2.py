@@ -128,7 +128,6 @@ class TDMPC2(torch.nn.Module):
 		for t in range(self.cfg.horizon):
 			reward = math.two_hot_inv(self.model.reward(z, actions[t], task), self.cfg)
 			z = self.model.next(z, actions[t], task)
-
 			G = G + discount * (1-termination) * reward
 			discount_update = self.discount[torch.tensor(task)] if self.cfg.multitask else self.discount
 			discount = discount * discount_update
@@ -255,6 +254,7 @@ class TDMPC2(torch.nn.Module):
 		"""
 		action, _ = self.model.pi(next_z, task)
 		discount = self.discount[task].unsqueeze(-1) if self.cfg.multitask else self.discount
+		# return reward + discount * (1-terminated) * self.model.Q(next_z, action, task, return_type='avg-all', target=True)
 		return reward + discount * (1-terminated) * self.model.Q(next_z, action, task, return_type='min', target=True)
 
 	def _update(self, obs, action, reward, terminated, task=None):
@@ -314,13 +314,27 @@ class TDMPC2(torch.nn.Module):
 
 		# Return training statistics
 		self.model.eval()
+		# termination classification metrics
+		# number of terminations in batch
+		termination_rate = terminated[-1].sum() / self.cfg.batch_size
+		# recall = TP / (TP + FN)
+		termination_tp = ((termination_pred > 0.5) & (terminated[-1] == 1)).sum()
+		termination_fn = ((termination_pred <= 0.5) & (terminated[-1] == 1)).sum()
+		termination_fp = ((termination_pred > 0.5) & (terminated[-1] == 0)).sum()
+		termination_recall = termination_tp / (termination_tp + termination_fn + 1e-9)
+		# precision = TP / (TP + FP)
+		termination_precision = termination_tp / (termination_tp + termination_fp + 1e-9)
+		# F1 score = 2 * (precision * recall) / (precision + recall)
+		termination_f1 = 2 * (termination_precision * termination_recall) / (termination_precision + termination_recall + 1e-9)
 		info = TensorDict({
 			"consistency_loss": consistency_loss,
 			"reward_loss": reward_loss,
 			"value_loss": value_loss,
 			"termination_loss": termination_loss,
-			"termination_mean": termination_pred.mean(),
-			"termination_mean_gt": terminated[-1].mean(),
+			"termination_rate": termination_rate,
+			"termination_recall": termination_recall,
+			"termination_precision": termination_precision,
+			"termination_f1": termination_f1,
 			"total_loss": total_loss,
 			"grad_norm": grad_norm,
 		})
