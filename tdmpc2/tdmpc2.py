@@ -254,7 +254,7 @@ class TDMPC2(torch.nn.Module):
 		"""
 		action, _ = self.model.pi(next_z, task)
 		discount = self.discount[task].unsqueeze(-1) if self.cfg.multitask else self.discount
-		# return reward + discount * (1-terminated) * self.model.Q(next_z, action, task, return_type='avg-all', target=True)
+		# return reward + discount * (1-terminated) * self.model.Q(next_z, action, task, return_type='min-all', target=True)
 		return reward + discount * (1-terminated) * self.model.Q(next_z, action, task, return_type='min', target=True)
 
 	def _update(self, obs, action, reward, terminated, task=None):
@@ -280,7 +280,7 @@ class TDMPC2(torch.nn.Module):
 		_zs = zs[:-1]
 		qs = self.model.Q(_zs, action, task, return_type='all')
 		reward_preds = self.model.reward(_zs, action, task)
-		termination_pred = self.model.termination(zs[-1], task)
+		termination_pred = self.model.termination(zs[1:], task, sigmoid=False)
 
 		# Compute losses
 		reward_loss, value_loss = 0, 0
@@ -291,7 +291,12 @@ class TDMPC2(torch.nn.Module):
 
 		consistency_loss = consistency_loss / self.cfg.horizon
 		reward_loss = reward_loss / self.cfg.horizon
-		termination_loss = F.binary_cross_entropy(termination_pred, terminated[-1])
+		# termination_loss = F.binary_cross_entropy(termination_pred, terminated)
+		termination_loss = F.binary_cross_entropy_with_logits(termination_pred, terminated)
+		# termination_loss = F.binary_cross_entropy(termination_pred, terminated, reduction='none')
+		# weighted mean over time, with last time step weighted as much as the rest combined
+		# termination_loss[:-1] = termination_loss[:-1] / (self.cfg.horizon**2)
+		# termination_loss = termination_loss.mean()
 		value_loss = value_loss / (self.cfg.horizon * self.cfg.num_q)
 		total_loss = (
 			self.cfg.consistency_coef * consistency_loss +
