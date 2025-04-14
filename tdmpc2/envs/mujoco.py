@@ -16,15 +16,16 @@ class MuJoCoWrapper(gym.Wrapper):
 		self.cfg = cfg
 		self._cumulative_reward = 0
 
-	def reset(self):
+	def reset(self, **kwargs):
 		self._cumulative_reward = 0
-		return self.env.reset()[0]
+		return self.env.reset(**kwargs)[0]
 
 	def step(self, action):
 		obs, reward, terminated, truncated, info = self.env.step(action.copy())
 		self._cumulative_reward += reward
 		done = terminated or truncated
 		info['terminated'] = terminated
+		info['truncated'] = truncated
 		if self.cfg.task == 'lunarlander-continuous':
 			info['success'] = self._cumulative_reward > 200
 		return obs, reward, done, info
@@ -47,8 +48,8 @@ def make_env(cfg):
 	if cfg.task == 'lunarlander-continuous':
 		env = gym.make(MUJOCO_TASKS[cfg.task], continuous=True, render_mode='rgb_array')
 	else:
-		env = gym.make(MUJOCO_TASKS[cfg.task], render_mode='rgb_array') #, terminate_when_unhealthy=False)
+		env = gym.make(MUJOCO_TASKS[cfg.task], render_mode='rgb_array')
 	env = MuJoCoWrapper(env, cfg)
 	env = Timeout(env, max_episode_steps=500 if cfg.task.startswith('lunarlander') else 1000)
-	cfg.discount_max = 0.99 # TODO: temporarily hardcore for these envs, makes comparison to other codebases easier
+	cfg.discount_max = 0.99 # TODO: temporarily hardcode for these envs, makes comparison to other codebases easier
 	return env

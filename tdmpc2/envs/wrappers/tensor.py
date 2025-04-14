@@ -39,4 +39,5 @@ class TensorWrapper(gym.Wrapper):
 		info = defaultdict(float, info)
 		info['success'] = float(info['success'])
 		info['terminated'] = torch.tensor(float(info['terminated']))
+		info['truncated'] = torch.tensor(float(info['truncated']))
 		return self._obs_to_tensor(obs), torch.tensor(reward, dtype=torch.float32), done, info

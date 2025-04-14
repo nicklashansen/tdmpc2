@@ -205,17 +205,24 @@ class TDMPC2(torch.nn.Module):
 		self._prev_mean.copy_(mean)
 		return a.clamp(-1, 1)
 
-	def update_pi(self, zs, task):
+	def update_pi(self, zs, task, mask):
 		"""
 		Update policy using a sequence of latent states.
 
 		Args:
 			zs (torch.Tensor): Sequence of latent states.
 			task (torch.Tensor): Task index (only used for multi-task experiments).
+			mask (torch.Tensor): Mask indicating valid time steps.
 
 		Returns:
 			float: Loss of the policy update.
 		"""
+		# Add one more step to mask
+		mask = torch.cat([mask, mask[-1].unsqueeze(0)], dim=0)
+		valid_steps = mask.sum() + 1e-9
+		zs = zs * mask.unsqueeze(-1)
+		zs = torch.where(torch.isnan(zs), torch.zeros_like(zs), zs)
+
 		action, info = self.model.pi(zs, task)
 		qs = self.model.Q(zs, action, task, return_type='avg', detach=True)
 		self.scale.update(qs[0])
@@ -223,7 +230,7 @@ class TDMPC2(torch.nn.Module):
 
 		# Loss is a weighted sum of Q-values
 		rho = torch.pow(self.cfg.rho, torch.arange(len(qs), device=self.device))
-		pi_loss = (-(self.cfg.entropy_coef * info["scaled_entropy"] + qs).mean(dim=(1,2)) * rho).mean()
+		pi_loss = ((((-(self.cfg.entropy_coef * info["scaled_entropy"] + qs)).squeeze(2) * mask).sum() / valid_steps) * rho).mean()
 		pi_loss.backward()
 		pi_grad_norm = torch.nn.utils.clip_grad_norm_(self.model._pi.parameters(), self.cfg.grad_clip_norm)
 		self.pi_optim.step()
@@ -254,10 +261,9 @@ class TDMPC2(torch.nn.Module):
 		"""
 		action, _ = self.model.pi(next_z, task)
 		discount = self.discount[task].unsqueeze(-1) if self.cfg.multitask else self.discount
-		# return reward + discount * (1-terminated) * self.model.Q(next_z, action, task, return_type='min-all', target=True)
 		return reward + discount * (1-terminated) * self.model.Q(next_z, action, task, return_type='min', target=True)
 
-	def _update(self, obs, action, reward, terminated, task=None):
+	def _update(self, obs, action, reward, terminated, truncated, task=None):		
 		# Compute targets
 		with torch.no_grad():
 			next_z = self.model.encode(obs[1:], task)
@@ -266,6 +272,19 @@ class TDMPC2(torch.nn.Module):
 		# Prepare for update
 		self.model.train()
 
+		# Replace NaNs in terminated and truncated with 0.0 (i.e., not terminated/truncated)
+		terminated = torch.where(torch.isnan(terminated), torch.ones_like(terminated), terminated)
+		truncated = torch.where(torch.isnan(truncated), torch.ones_like(truncated), truncated)
+
+		# Create done flags, treating NaNs as done too
+		done = (terminated + truncated).clamp(max=1.0).squeeze(-1)
+		done = torch.where(torch.isnan(done), torch.ones_like(done), done)
+		mask = torch.cumprod(1.0 - done, dim=0)
+		# mask = torch.ones_like(done)
+		# for t in range(1, done.size(0)):
+		# 	# If done at t-1, mask should be 0 at t and all subsequent steps
+		# 	mask[t] = mask[t] * (1 - done[t-1])
+
 		# Latent rollout
 		zs = torch.empty(self.cfg.horizon+1, self.cfg.batch_size, self.cfg.latent_dim, device=self.device)
 		z = self.model.encode(obs[0], task)
@@ -273,8 +292,13 @@ class TDMPC2(torch.nn.Module):
 		consistency_loss = 0
 		for t, (_action, _next_z) in enumerate(zip(action.unbind(0), next_z.unbind(0))):
 			z = self.model.next(z, _action, task)
-			consistency_loss = consistency_loss + F.mse_loss(z, _next_z) * self.cfg.rho**t
+			consistency_loss_t = (F.mse_loss(z, _next_z, reduction='none').mean(-1) * mask[t]).nansum() * self.cfg.rho**t
+			consistency_loss = consistency_loss + consistency_loss_t
 			zs[t+1] = z
+
+		# Average consistency loss over valid (non-masked) steps
+		valid_steps = mask.sum()
+		consistency_loss = consistency_loss / (valid_steps + 1e-9)
 
 		# Predictions
 		_zs = zs[:-1]
@@ -283,21 +307,30 @@ class TDMPC2(torch.nn.Module):
 		termination_pred = self.model.termination(zs[1:], task, sigmoid=False)
 
 		# Compute losses
-		reward_loss, value_loss = 0, 0
-		for t, (rew_pred_unbind, rew_unbind, td_targets_unbind, qs_unbind) in enumerate(zip(reward_preds.unbind(0), reward.unbind(0), td_targets.unbind(0), qs.unbind(1))):
-			reward_loss = reward_loss + math.soft_ce(rew_pred_unbind, rew_unbind, self.cfg).mean() * self.cfg.rho**t
-			for _, qs_unbind_unbind in enumerate(qs_unbind.unbind(0)):
-				value_loss = value_loss + math.soft_ce(qs_unbind_unbind, td_targets_unbind, self.cfg).mean() * self.cfg.rho**t
+		reward_loss = 0.0
+		value_loss = 0.0
+		for t, (rew_pred_t, rew_t, td_target_t, q_logits_t) in enumerate(zip(
+			reward_preds.unbind(0), reward.unbind(0), td_targets.unbind(0), qs.unbind(1))):
 
-		consistency_loss = consistency_loss / self.cfg.horizon
-		reward_loss = reward_loss / self.cfg.horizon
-		# termination_loss = F.binary_cross_entropy(termination_pred, terminated)
-		termination_loss = F.binary_cross_entropy_with_logits(termination_pred, terminated)
-		# termination_loss = F.binary_cross_entropy(termination_pred, terminated, reduction='none')
-		# weighted mean over time, with last time step weighted as much as the rest combined
-		# termination_loss[:-1] = termination_loss[:-1] / (self.cfg.horizon**2)
-		# termination_loss = termination_loss.mean()
-		value_loss = value_loss / (self.cfg.horizon * self.cfg.num_q)
+			valid_mask = mask[t]  # [batch_size]
+			if valid_mask.sum() == 0:
+				continue  # Skip if no valid samples at this time step
+
+			# Use only valid targets
+			safe_rew_t = torch.where(valid_mask.bool(), rew_t, torch.zeros_like(rew_t))
+			rew_ce = math.soft_ce(rew_pred_t, safe_rew_t, self.cfg).squeeze(-1)
+			reward_loss = reward_loss + (self.cfg.rho ** t) * (rew_ce * valid_mask).nansum()
+
+			# Value loss
+			for q in q_logits_t.unbind(0):  # Loop over ensemble Q-heads
+				q_ce = math.soft_ce(q, td_target_t, self.cfg).squeeze(-1)
+				q_ce = q_ce * mask[t]  # Apply mask
+				value_loss += (self.cfg.rho ** t) * q_ce.nansum()
+		
+		valid_steps = mask.sum() + 1e-9
+		reward_loss = reward_loss / valid_steps
+		value_loss = value_loss / (valid_steps * self.cfg.num_q)
+		termination_loss = F.binary_cross_entropy_with_logits(termination_pred, terminated, reduction='none').nanmean()
 		total_loss = (
 			self.cfg.consistency_coef * consistency_loss +
 			self.cfg.reward_coef * reward_loss +
@@ -312,7 +345,7 @@ class TDMPC2(torch.nn.Module):
 		self.optim.zero_grad(set_to_none=True)
 
 		# Update policy
-		pi_info = self.update_pi(zs.detach(), task)
+		pi_info = self.update_pi(zs.detach(), task, mask)
 
 		# Update target Q-functions
 		self.model.soft_update_target_Q()
@@ -356,9 +389,9 @@ class TDMPC2(torch.nn.Module):
 		Returns:
 			dict: Dictionary of training statistics.
 		"""
-		obs, action, reward, terminated, task = buffer.sample()
+		obs, action, reward, terminated, truncated, task = buffer.sample()
 		kwargs = {}
 		if task is not None:
 			kwargs["task"] = task
 		torch.compiler.cudagraph_mark_step_begin()
-		return self._update(obs, action, reward, terminated, **kwargs)
+		return self._update(obs, action, reward, terminated, truncated, **kwargs)

@@ -17,7 +17,7 @@ class Buffer():
 		self._sampler = SliceSampler(
 			num_slices=self.cfg.batch_size,
 			end_key=None,
-			traj_key='episode',
+			traj_key=None,
 			truncated_key=None,
 			strict_length=True,
 			cache_values=cfg.multitask,
@@ -83,7 +83,8 @@ class Buffer():
 
 	def add(self, td):
 		"""Add an episode to the buffer."""
-		td['episode'] = torch.full_like(td['reward'], self._num_eps, dtype=torch.int64)
+		# td['episode'] = torch.full_like(td['reward'], self._num_eps, dtype=torch.int64)
+		td['episode'] = torch.zeros_like(td['reward'], dtype=torch.int64)
 		if self._num_eps == 0:
 			self._buffer = self._init(td)
 		self._buffer.extend(td)
@@ -95,15 +96,16 @@ class Buffer():
 		Prepare a sampled batch for training (post-processing).
 		Expects `td` to be a TensorDict with batch size TxB.
 		"""
-		td = td.select("obs", "action", "reward", "terminated", "task", strict=False).to(self._device, non_blocking=True)
+		td = td.select("obs", "action", "reward", "terminated", "truncated", "task", strict=False).to(self._device, non_blocking=True)
 		obs = td.get('obs').contiguous()
 		action = td.get('action')[1:].contiguous()
 		reward = td.get('reward')[1:].unsqueeze(-1).contiguous()
 		terminated = td.get('terminated')[1:].unsqueeze(-1).contiguous()
+		truncated = td.get('truncated')[1:].unsqueeze(-1).contiguous()
 		task = td.get('task', None)
 		if task is not None:
 			task = task[0].contiguous()
-		return obs, action, reward, terminated, task
+		return obs, action, reward, terminated, truncated, task
 
 	def sample(self):
 		"""Sample a batch of subsequences from the buffer."""
