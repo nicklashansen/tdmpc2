@@ -47,8 +47,9 @@ def make_env(cfg):
 	if cfg.task == 'lunarlander-continuous':
 		env = gym.make(MUJOCO_TASKS[cfg.task], continuous=True, render_mode='rgb_array')
 	else:
-		env = gym.make(MUJOCO_TASKS[cfg.task], render_mode='rgb_array') #, terminate_when_unhealthy=False)
+		env = gym.make(MUJOCO_TASKS[cfg.task], render_mode='rgb_array')
 	env = MuJoCoWrapper(env, cfg)
 	env = Timeout(env, max_episode_steps=500 if cfg.task.startswith('lunarlander') else 1000)
-	cfg.discount_max = 0.99 # TODO: temporarily hardcore for these envs, makes comparison to other codebases easier
+	cfg.discount_max = 0.99 # TODO: temporarily hardcode for these envs, makes comparison to other codebases easier
+	cfg.rho = 0.7 # TODO: temporarily increase rho for episodic tasks
 	return env
