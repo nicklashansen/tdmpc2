@@ -17,15 +17,17 @@ class OnlineTrainer(Trainer):
 
 	def common_metrics(self):
 		"""Return a dictionary of current metrics."""
+		elapsed_time = time() - self._start_time
 		return dict(
 			step=self._step,
 			episode=self._ep_idx,
-			total_time=time() - self._start_time,
+			elapsed_time=elapsed_time,
+			steps_per_second=self._step / elapsed_time
 		)
 
 	def eval(self):
 		"""Evaluate a TD-MPC2 agent."""
-		ep_rewards, ep_successes = [], []
+		ep_rewards, ep_successes, ep_lengths = [], [], []
 		for i in range(self.cfg.eval_episodes):
 			obs, done, ep_reward, t = self.env.reset(), False, 0, 0
 			if self.cfg.save_video:
@@ -40,11 +42,13 @@ class OnlineTrainer(Trainer):
 					self.logger.video.record(self.env)
 			ep_rewards.append(ep_reward)
 			ep_successes.append(info['success'])
+			ep_lengths.append(t)
 			if self.cfg.save_video:
 				self.logger.video.save(self._step)
 		return dict(
 			episode_reward=np.nanmean(ep_rewards),
 			episode_success=np.nanmean(ep_successes),
+			episode_length= np.nanmean(ep_lengths),
 		)
 
 	def to_td(self, obs, action=None, reward=None, terminated=None):
@@ -84,12 +88,14 @@ class OnlineTrainer(Trainer):
 					eval_next = False
 
 				if self._step > 0:
+					if info['terminated'] and not self.cfg.episodic:
+						raise ValueError('Termination detected but you are not in episodic mode. ' \
+						'Set `episodic=true` to enable support for terminations.')
 					train_metrics.update(
 						episode_reward=torch.tensor([td['reward'] for td in self._tds[1:]]).sum(),
 						episode_success=info['success'],
 						episode_length=len(self._tds),
-						episode_terminated=info['terminated'],
-					)
+						episode_terminated=info['terminated'])
 					train_metrics.update(self.common_metrics())
 					self.logger.log(train_metrics, 'train')
 					self._ep_idx = self.buffer.add(torch.cat(self._tds))

@@ -16,7 +16,7 @@ CONSOLE_FORMAT = [
 	("step", "I", "int"),
 	("episode_reward", "R", "float"),
 	("episode_success", "S", "float"),
-	("total_time", "T", "time"),
+	("elapsed_time", "T", "time"),
 ]
 
 CAT_TO_COLOR = {

@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from tensordict import TensorDict
 
 
 def soft_ce(pred, target, cfg):
@@ -84,11 +85,26 @@ def two_hot_inv(x, cfg):
 
 
 def gumbel_softmax_sample(p, temperature=1.0, dim=0):
+	"""Sample from the Gumbel-Softmax distribution."""
 	logits = p.log()
-	# Generate Gumbel noise
 	gumbels = (
 		-torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
 	)  # ~Gumbel(0,1)
 	gumbels = (logits + gumbels) / temperature  # ~Gumbel(logits,tau)
 	y_soft = gumbels.softmax(dim)
 	return y_soft.argmax(-1)
+
+
+def termination_statistics(pred, target, eps=1e-9):
+	"""Compute episode termination statistics."""
+	pred = pred.squeeze(-1)
+	target = target.squeeze(-1)
+	rate = target.sum() / len(target)
+	tp = ((pred > 0.5) & (target == 1)).sum()
+	fn = ((pred <= 0.5) & (target == 1)).sum()
+	fp = ((pred > 0.5) & (target == 0)).sum()
+	recall = tp / (tp + fn + eps)
+	precision = tp / (tp + fp + eps)
+	f1 = 2 * (precision * recall) / (precision + recall + eps)
+	return TensorDict({'termination_rate': rate,
+			'termination_f1': f1})

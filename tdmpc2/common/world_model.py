@@ -56,6 +56,8 @@ class WorldModel(nn.Module):
 		repr = 'TD-MPC2 World Model\n'
 		modules = ['Encoder', 'Dynamics', 'Reward', 'Termination', 'Policy prior', 'Q-functions']
 		for i, m in enumerate([self._encoder, self._dynamics, self._reward, self._termination, self._pi, self._Qs]):
+			if m == self._termination and not self.cfg.episodic:
+				continue
 			repr += f"{modules[i]}: {m}\n"
 		repr += "Learnable parameters: {:,}".format(self.total_params)
 		return repr
@@ -127,16 +129,17 @@ class WorldModel(nn.Module):
 		z = torch.cat([z, a], dim=-1)
 		return self._reward(z)
 	
-	def termination(self, z, task, sigmoid=True):
+	def termination(self, z, task, unnormalized=False):
 		"""
 		Predicts termination signal.
 		"""
 		assert task is None
 		if self.cfg.multitask:
 			z = self.task_emb(z, task)
-		if sigmoid:
-			return torch.sigmoid(self._termination(z))
-		return self._termination(z)
+		if unnormalized:
+			return self._termination(z)
+		return torch.sigmoid(self._termination(z))
+		
 
 	def pi(self, z, task):
 		"""
@@ -186,12 +189,10 @@ class WorldModel(nn.Module):
 		`return_type` can be one of [`min`, `avg`, `all`]:
 			- `min`: return the minimum of two randomly subsampled Q-values.
 			- `avg`: return the average of two randomly subsampled Q-values.
-			- 'min-all': return the minimum of all Q-values.
-			- 'avg-all': return the average of all Q-values.
 			- `all`: return all Q-values.
 		`target` specifies whether to use the target Q-networks or not.
 		"""
-		assert return_type in {'min', 'avg', 'min-all', 'avg-all', 'all'}
+		assert return_type in {'min', 'avg', 'all'}
 
 		if self.cfg.multitask:
 			z = self.task_emb(z, task)
@@ -207,14 +208,6 @@ class WorldModel(nn.Module):
 
 		if return_type == 'all':
 			return out
-
-		if return_type == 'avg-all':
-			Q = math.two_hot_inv(out, self.cfg)
-			return Q.mean(0)
-		
-		if return_type == 'min-all':
-			Q = math.two_hot_inv(out, self.cfg)
-			return Q.min(0).values
 
 		qidx = torch.randperm(self.cfg.num_q, device=out.device)[:2]
 		Q = math.two_hot_inv(out[qidx], self.cfg)

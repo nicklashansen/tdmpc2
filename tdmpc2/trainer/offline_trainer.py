@@ -81,7 +81,7 @@ class OfflineTrainer(Trainer):
 			if i % self.cfg.eval_freq == 0 or i % 10_000 == 0:
 				metrics = {
 					'iteration': i,
-					'total_time': time() - self._start_time,
+					'elapsed_time': time() - self._start_time,
 				}
 				metrics.update(train_metrics)
 				if i % self.cfg.eval_freq == 0:

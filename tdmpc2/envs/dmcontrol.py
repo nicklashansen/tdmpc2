@@ -9,9 +9,8 @@ from dm_control import suite
 suite.ALL_TASKS = suite.ALL_TASKS + suite._get_tasks('custom')
 suite.TASKS_BY_DOMAIN = suite._get_tasks_by_domain(suite.ALL_TASKS)
 from dm_control.suite.wrappers import action_scale
-from envs.wrappers.timeout import Timeout
 
-from envs.wrappers.episodic import EpisodicWrapper
+from envs.wrappers.timeout import Timeout
 
 
 def get_obs_shape(env):

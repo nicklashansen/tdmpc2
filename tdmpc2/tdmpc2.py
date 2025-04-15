@@ -36,7 +36,7 @@ class TDMPC2(torch.nn.Module):
 		self.discount = torch.tensor(
 			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='cuda:0'
 		) if self.cfg.multitask else self._get_discount(cfg.episode_length)
-		print('Max episode length:', cfg.episode_length)
+		print('Episode length:', cfg.episode_length)
 		print('Discount factor:', self.discount)
 		self._prev_mean = torch.nn.Buffer(torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device))
 		if cfg.compile:
@@ -197,7 +197,7 @@ class TDMPC2(torch.nn.Module):
 				std = std * self.model._action_masks[task]
 
 		# Select action
-		rand_idx = math.gumbel_softmax_sample(score.squeeze(1))  # gumbel_softmax_sample is compatible with cuda graphs
+		rand_idx = math.gumbel_softmax_sample(score.squeeze(1))
 		actions = torch.index_select(elite_actions, 1, rand_idx).squeeze(1)
 		a, std = actions[0], std[0]
 		if not eval_mode:
@@ -279,7 +279,7 @@ class TDMPC2(torch.nn.Module):
 		_zs = zs[:-1]
 		qs = self.model.Q(_zs, action, task, return_type='all')
 		reward_preds = self.model.reward(_zs, action, task)
-		termination_pred = self.model.termination(zs[1:], task, sigmoid=False)
+		termination_pred = self.model.termination(zs[1:], task, unnormalized=True)
 
 		# Compute losses
 		reward_loss, value_loss = 0, 0
@@ -290,7 +290,10 @@ class TDMPC2(torch.nn.Module):
 
 		consistency_loss = consistency_loss / self.cfg.horizon
 		reward_loss = reward_loss / self.cfg.horizon
-		termination_loss = F.binary_cross_entropy_with_logits(termination_pred, terminated)
+		if self.cfg.episodic:
+			termination_loss = F.binary_cross_entropy_with_logits(termination_pred, terminated)
+		else:
+			termination_loss = 0.
 		value_loss = value_loss / (self.cfg.horizon * self.cfg.num_q)
 		total_loss = (
 			self.cfg.consistency_coef * consistency_loss +
@@ -313,30 +316,16 @@ class TDMPC2(torch.nn.Module):
 
 		# Return training statistics
 		self.model.eval()
-		# termination classification metrics
-		# number of terminations in batch
-		termination_rate = terminated[-1].sum() / self.cfg.batch_size
-		# recall = TP / (TP + FN)
-		termination_tp = ((termination_pred > 0.5) & (terminated[-1] == 1)).sum()
-		termination_fn = ((termination_pred <= 0.5) & (terminated[-1] == 1)).sum()
-		termination_fp = ((termination_pred > 0.5) & (terminated[-1] == 0)).sum()
-		termination_recall = termination_tp / (termination_tp + termination_fn + 1e-9)
-		# precision = TP / (TP + FP)
-		termination_precision = termination_tp / (termination_tp + termination_fp + 1e-9)
-		# F1 score = 2 * (precision * recall) / (precision + recall)
-		termination_f1 = 2 * (termination_precision * termination_recall) / (termination_precision + termination_recall + 1e-9)
 		info = TensorDict({
 			"consistency_loss": consistency_loss,
 			"reward_loss": reward_loss,
 			"value_loss": value_loss,
 			"termination_loss": termination_loss,
-			"termination_rate": termination_rate,
-			"termination_recall": termination_recall,
-			"termination_precision": termination_precision,
-			"termination_f1": termination_f1,
 			"total_loss": total_loss,
 			"grad_norm": grad_norm,
 		})
+		if self.cfg.episodic:
+			info.update(math.termination_statistics(torch.sigmoid(termination_pred[-1]), terminated[-1]))
 		info.update(pi_info)
 		return info.detach().mean()
 

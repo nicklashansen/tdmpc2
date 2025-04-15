@@ -6,6 +6,7 @@ from envs.wrappers.timeout import Timeout
 MUJOCO_TASKS = {
 	'mujoco-walker': 'Walker2d-v4',
 	'mujoco-halfcheetah': 'HalfCheetah-v4',
+	'bipedal-walker': 'BipedalWalker-v3',
 	'lunarlander-continuous': 'LunarLander-v2',
 }
 
@@ -49,7 +50,10 @@ def make_env(cfg):
 	else:
 		env = gym.make(MUJOCO_TASKS[cfg.task], render_mode='rgb_array')
 	env = MuJoCoWrapper(env, cfg)
-	env = Timeout(env, max_episode_steps=500 if cfg.task.startswith('lunarlander') else 1000)
+	env = Timeout(env, max_episode_steps={
+		'lunarlander-continuous': 500,
+		'bipedal-walker': 1600,
+	}.get(cfg.task, 1000)) # Default max episode steps for other tasks
 	cfg.discount_max = 0.99 # TODO: temporarily hardcode for these envs, makes comparison to other codebases easier
-	cfg.rho = 0.7 # TODO: temporarily increase rho for episodic tasks
+	cfg.rho = 0.7 # TODO: increase rho for episodic tasks since termination always happens at the end of a sequence
 	return env
