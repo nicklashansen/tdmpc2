@@ -71,6 +71,7 @@ enable_wandb: true
 save_csv: true
 
 # misc
+compile: true
 save_video: true
 save_agent: true
 seed: 1
@@ -88,6 +89,3 @@ action_dims: ???
 episode_lengths: ???
 seed_steps: ???
 bin_size: ???
-
-# speedups
-compile: false

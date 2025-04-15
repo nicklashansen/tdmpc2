@@ -131,7 +131,8 @@ class TDMPC2(torch.nn.Module):
 			G = G + discount * (1-termination) * reward
 			discount_update = self.discount[torch.tensor(task)] if self.cfg.multitask else self.discount
 			discount = discount * discount_update
-			termination = torch.clip(termination + (self.model.termination(z, task) > 0.5).float(), max=1.)
+			if self.cfg.episodic:
+				termination = torch.clip(termination + (self.model.termination(z, task) > 0.5).float(), max=1.)
 		action, _ = self.model.pi(z, task)
 		return G + discount * (1-termination) * self.model.Q(z, action, task, return_type='avg')
 
