@@ -1,8 +1,11 @@
 defaults:
     - override hydra/launcher: submitit_local
 
+# Top-level Agent Selection
+agent_type: tdmpc2 # Options: 'tdmpc2', 'dmpc'
+
 # environment
-task: dog-run
+task: mw-assembly
 obs: state
 
 # evaluation
@@ -11,73 +14,122 @@ eval_episodes: 10
 eval_freq: 50000
 
 # training
-steps: 10_000_00
-batch_size: 256
-reward_coef: 0.1
-value_coef: 0.1
-consistency_coef: 20
-rho: 0.5
-lr: 3e-4
-enc_lr_scale: 0.3
-grad_clip_norm: 20
-tau: 0.01
-discount_denom: 5
-discount_min: 0.95
-discount_max: 0.995
-buffer_size: 1_000
+steps: 2_000_000 # From Appendix E.5
+batch_size: 264
+lr: 1e-4 # Base LR from Appendix E.5
+lr_warmup_steps: 500 # Appendix E.5
+lr_min: 1e-5 # Cosine decay target, Appendix E.5
+ema_decay: 0.99 # Appendix E.5
+grad_clip_norm: 5 # Appendix E.5
+discount: 0.99 # General discount factor, Appendix E.4 (adjust for Hopper if needed)
+buffer_size: 1_000 # Online buffer episodes (Offline uses MAX_BUFFER_TRANSITIONS)
 exp_name: default
-data_dir: /tdmpc2/datasets/meta_world/mt30
+data_dir: /tdmpc2/datasets/meta_world/mt80 # Uses task name for path
+buffer_device: cuda:0
+# TD-MPC2 Specific Training Params (Ignored if agent_type=dmpc)
+reward_coef: 0.1 
+value_coef: 0.1 
+consistency_coef: 20 
+rho: 0.5 
+enc_lr_scale: 0.3 
+tau: 0.01 
+discount_denom: 5 
+discount_min: 0.95 
+discount_max: 0.995 
 
-# planning
-mpc: true
+
+# --- Planning --- 
+history_len: 1 # H for D-MPC conditioning, Appendix F
+horizon: 32 # F for D-MPC forecast, Appendix F
+
+# --- TD-MPC2 CEM Planner --- 
+mpc: true # Enable TD-MPC2 style CEM planning
 iterations: 6
-num_samples: 512
+num_samples: 512 # CEM samples
 num_elites: 64
 num_pi_trajs: 24
-horizon: 3
+# horizon: 3 # Uses common horizon now
 min_std: 0.05
 max_std: 2
 temperature: 0.5
 
-# actor
+# --- D-MPC SSR Planner --- 
+dmpc_num_samples: 64 # N for SSR planner, Appendix F
+dmpc_dynamics_inference_steps: 10 # Appendix E.1
+dmpc_action_inference_steps: 32 # Appendix E.1
+
+
+# --- Actor (TD-MPC2) --- 
 log_std_min: -10
 log_std_max: 2
 entropy_coef: 1e-4
 
-# critic
+# --- Critic (TD-MPC2) --- 
 num_bins: 101
 vmin: -10
 vmax: +10
 
-# architecture
-model_size: ???
-num_enc_layers: 2
-enc_dim: 256
-num_channels: 32
-mlp_dim: 512
-latent_dim: 512
+# --- Architecture --- 
+model_size: ??? # TD-MPC2 specific sizing parameter
+# General Architecture Params (Used by both, potentially)
+num_enc_layers: 2 # Reused by D-MPC Encoder if applicable
+enc_dim: 256 # Reused by D-MPC Encoder if applicable
+num_channels: 32 # Likely TD-MPC2 specific
+mlp_dim: 512 # General MLP dim for TD-MPC2 components
+latent_dim: 512 # Shared latent space assumption
 task_dim: 96
-num_q: 5
+num_q: 5 # TD-MPC2 specific
 dropout: 0.01
 simnorm_dim: 8
 
-# logging
+# D-MPC Transformer Architecture Params (Appendix E.1 / E.4)
+transformer_embed_dim: 256 # Shared token dimension
+transformer_num_heads: 8
+transformer_mlp_dim: 2048 # Hidden dim in MLP blocks
+# Layer counts defined below
+
+# --- D-MPC Specific Model Layer Counts (Placeholders) --- 
+diffusion_dynamics_layers: 5 # Appendix E.1
+diffusion_action_layers: 5 # Appendix E.1
+sequence_objective_layers: 10 # Appendix E.4
+
+# --- Logging --- 
 wandb_project: "TD-MPC2"
 wandb_entity: "ameyjoshi1011-new-york-university"
 wandb_silent: false
 enable_wandb: true
 save_csv: true
 
-# misc
+# --- Misc --- 
 save_video: true
+record_videos: false
+video_fps: 30
+camera_id: 0
+video_episodes: 10  # Number of episodes to record per task (1-10)
+video_freq: 1000 # Frequency for recording training videos
 save_agent: true
 seed: 1
 
-# convenience
+# --- Convenience (Mostly Auto-Filled by parser.py) --- 
 work_dir: /tdmpc2/videos/
 task_title: ???
 multitask: True
 tasks: ['mw-assembly', 'mw-basketball', 'mw-button-press-topdown', 'mw-button-press-topdown-wall']
+
+# Custom subset of 10 Meta-World tasks
+mw10_tasks: [
+  'mw-assembly', 
+  'mw-basketball', 
+  'mw-button-press-topdown', 
+  'mw-button-press-topdown-wall',
+  'mw-button-press-wall',
+  'mw-button-press',
+  'mw-door-close',
+  'mw-door-open',
+  'mw-drawer-close',
+  'mw-drawer-open'
+]
+
 obs_shape: ???
 action_dim: ???
 episode_length: ???
@@ -87,5 +139,5 @@ episode_lengths: ???
 seed_steps: ???
 bin_size: ???
 
-# speedups
-compile: False
+# --- Speedups --- 
+compile: True

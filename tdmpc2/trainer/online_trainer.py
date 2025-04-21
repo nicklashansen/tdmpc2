@@ -32,7 +32,10 @@ class OnlineTrainer(Trainer):
 				self.logger.video.init(self.env, enabled=(i==0))
 			while not done:
 				torch.compiler.cudagraph_mark_step_begin()
-				action = self.agent.act(obs, t0=t==0, eval_mode=True)
+				# Pass the current task index to the agent's act method
+				# Assumes self.env is the MultitaskWrapper or has a task_idx property
+				task_idx = getattr(self.env, 'task_idx', None) # Get task_idx if available
+				action = self.agent.act(obs, t0=t==0, eval_mode=True, task=task_idx)
 				obs, reward, done, info = self.env.step(action)
 				ep_reward += reward
 				t += 1
@@ -47,26 +50,41 @@ class OnlineTrainer(Trainer):
 			episode_success=np.nanmean(ep_successes),
 		)
 
-	def to_td(self, obs, action=None, reward=None):
-		"""Creates a TensorDict for a new episode."""
+	def to_td(self, obs, action=None, reward=None, task_idx=None):
+		"""Creates a TensorDict for a new episode, including task index."""
 		if isinstance(obs, dict):
 			obs = TensorDict(obs, batch_size=(), device='cpu')
 		else:
 			obs = obs.unsqueeze(0).cpu()
 		if action is None:
-			action = torch.full_like(self.env.rand_act(), float('nan'))
+			# Convert numpy sample to tensor before using full_like
+			action_sample_np = self.env.action_space.sample()
+			action_sample_tensor = torch.from_numpy(action_sample_np.astype(np.float32))
+			action = torch.full_like(action_sample_tensor, float('nan'))
 		if reward is None:
 			reward = torch.tensor(float('nan'))
-		td = TensorDict(
-			obs=obs,
-			action=action.unsqueeze(0),
-			reward=reward.unsqueeze(0),
-		batch_size=(1,))
+		if task_idx is None:
+			task_idx = torch.tensor(-1) # Default/placeholder if not provided
+		else:
+			task_idx = torch.tensor(task_idx)
+
+		td_data = {
+			'obs': obs,
+			'action': action.unsqueeze(0),
+			'reward': reward.unsqueeze(0),
+		}
+		if self.cfg.multitask:
+			td_data['task'] = task_idx.unsqueeze(0)
+
+		td = TensorDict(td_data, batch_size=(1,))
 		return td
 
 	def train(self):
 		"""Train a TD-MPC2 agent."""
 		train_metrics, done, eval_next = {}, True, False
+		current_task_idx = None # Keep track of the task for the current episode
+		num_tasks = len(self.cfg.tasks) if self.cfg.multitask else 1
+
 		while self._step <= self.cfg.steps:
 			# Evaluate agent periodically
 			if self._step % self.cfg.eval_freq == 0:
@@ -89,16 +107,26 @@ class OnlineTrainer(Trainer):
 					self.logger.log(train_metrics, 'train')
 					self._ep_idx = self.buffer.add(torch.cat(self._tds))
 
-				obs = self.env.reset()
-				self._tds = [self.to_td(obs)]
+				# --- Select task for new episode ---
+				if self.cfg.multitask:
+					current_task_idx = np.random.randint(0, num_tasks)
+					obs = self.env.reset(task_idx=current_task_idx) # Pass task_idx to wrapper reset
+				else:
+					obs = self.env.reset()
+					current_task_idx = None # Or 0 if your agent expects a task ID even for single task
+				# -------------------------------------
+				self._tds = [self.to_td(obs, task_idx=current_task_idx)] # Store initial obs with task
 
 			# Collect experience
 			if self._step > self.cfg.seed_steps:
-				action = self.agent.act(obs, t0=len(self._tds)==1)
+				# For action selection during training, task is inferred by agent from obs if needed,
+				# or potentially passed if the act method requires it explicitly for online multi-task.
+				# Let's assume act doesn't need it explicitly here, but update does.
+				action = self.agent.act(obs, t0=len(self._tds)==1, task=current_task_idx)
 			else:
 				action = self.env.rand_act()
 			obs, reward, done, info = self.env.step(action)
-			self._tds.append(self.to_td(obs, action, reward))
+			self._tds.append(self.to_td(obs, action, reward, task_idx=current_task_idx)) # Store transition with task
 
 			# Update agent
 			if self._step >= self.cfg.seed_steps:
