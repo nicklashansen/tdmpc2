@@ -99,7 +99,11 @@ class Buffer():
 		obs = td.get('obs').contiguous()
 		action = td.get('action')[1:].contiguous()
 		reward = td.get('reward')[1:].unsqueeze(-1).contiguous()
-		terminated = td.get('terminated')[1:].unsqueeze(-1).contiguous()
+		terminated = td.get('terminated', None)
+		if terminated is not None:
+			terminated = td.get('terminated')[1:].unsqueeze(-1).contiguous()
+		else:
+			terminated = torch.zeros_like(reward)
 		task = td.get('task', None)
 		if task is not None:
 			task = task[0].contiguous()

@@ -280,7 +280,8 @@ class TDMPC2(torch.nn.Module):
 		_zs = zs[:-1]
 		qs = self.model.Q(_zs, action, task, return_type='all')
 		reward_preds = self.model.reward(_zs, action, task)
-		termination_pred = self.model.termination(zs[1:], task, unnormalized=True)
+		if self.cfg.episodic:
+			termination_pred = self.model.termination(zs[1:], task, unnormalized=True)
 
 		# Compute losses
 		reward_loss, value_loss = 0, 0
