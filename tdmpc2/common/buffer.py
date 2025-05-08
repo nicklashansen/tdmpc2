@@ -1,8 +1,8 @@
 import torch
 from tensordict import TensorDict
-from torchrl.data.replay_buffers import ReplayBuffer, LazyTensorStorage, ListStorage
-from torchrl.data.replay_buffers.samplers import SliceSampler
 import numpy as np
+import random
+from collections import deque
 from omegaconf import OmegaConf
 
 # Define standard collection specs (can be extended)
@@ -17,311 +17,260 @@ COLLECTION_SPECS = {
 }
 
 class Buffer:
-	"""Replay buffer for TD-MPC2 and D-MPC training.
-	Uses torchrl.data.ReplayBuffer with LazyTensorStorage and SliceSampler.
-	Handles data preparation for training.
+	"""
+	Simple episode-based buffer for DMPC training that directly stores episodes
+	and provides efficient sequence sampling.
 	"""
 
 	def __init__(self, cfg):
 		self.cfg = cfg
-		# DMPC forecast horizon is cfg.horizon, TDMPC2 planning horizon is also cfg.horizon
 		self.horizon = cfg.horizon
-		self.frame_stack = cfg.get('frame_stack', 1) # Default to 1 if not specified
-		self.capacity = min(cfg.buffer_size, cfg.steps) // cfg.episode_length
-		self.num_shared = cfg.get('buffer_num_shared', 0) # For multi-task RL
+		self.capacity = cfg.buffer_size
 		self.device = torch.device(cfg.buffer_device)
-
-		# Get shape and dtype specs
-		self.action_shape = cfg.action_shape
-		specs = {k: self._get_spec(v) for k, v in COLLECTION_SPECS.items()}
-
-		# Create tensor storage - REVERT TO LAZYTENSORSTORAGE
-		storage = LazyTensorStorage(
-			max_size=cfg.buffer_size, # Directly use buffer_size (transitions)
-			device=self.device,
-		)
-
-		# Create sampler
-		# Both TDMPC2 and DMPC need sequences of length H+1 or F+1
-		slice_len = self.horizon + 1
-		self.sampler = SliceSampler(
-			slice_len=slice_len,
-			end_key='terminated', # Restore: Explicitly use 'terminated' to mark episode ends
-			traj_key='episode',   # Restore: Use 'episode' to group transitions
-			# truncated_key=None, # We handle termination/truncation within batch processing
-		)
-
-		# Create replay buffer
-		self.buffer = ReplayBuffer(
-			storage=storage,
-			sampler=self.sampler,
-			batch_size=cfg.batch_size,
-			prefetch=cfg.get('buffer_prefetch', 4), # Default prefetch if not specified
-			pin_memory=True if self.device.type == 'cuda' else False, # Pin memory if using GPU buffer
-		)
-
-		# Define the keys expected in the buffer based on COLLECTION_SPECS
-		# These keys MUST match the keys added via buffer.add()
+		self.multitask = cfg.get('multitask', False)
+		self.episode_length = cfg.get('episode_length', 100)
+		self.min_seq_length = self.horizon + 1  # Minimum sequence length needed
+		
+		# Variables to track buffer state
+		self._episodes = deque(maxlen=10000)  # Store complete episodes
+		self._num_transitions = 0
+		self._current_episode = []
+		self._current_episode_idx = 0
+		
+		# Define expected keys
 		self.keys = ['obs', 'action', 'reward', 'next_obs', 'terminated', 'truncated']
-		if cfg.get('multitask', False):
+		if self.multitask:
 			self.keys.append('task')
 
-		self._current_episode = 0
-		self._current_step = 0
-		self._num_samples = 0
-		self._initialized = False # Flag to indicate if buffer received data spec
-
-	@property
-	def num_eps(self):
-		"""Returns the number of episodes currently started or completed in the buffer."""
-		return self._current_episode
-
-	def _get_spec(self, spec_dict):
-		"""Helper to resolve spec values (like 'obs_shape')."""
-		spec_shape_key = spec_dict['shape']
-		spec_dtype = spec_dict['dtype']
+		# Debug flag
+		self.debug = cfg.get('debug_buffer', False)
 		
-		if spec_shape_key == 'obs_shape':
-			# Get the primary observation key (e.g., 'state', 'rgb') from config
-			# Fallback to 'state' if cfg.obs is not explicitly set
-			primary_obs_key = getattr(self.cfg, 'obs', 'state') 
-			if primary_obs_key not in self.cfg.obs_shape:
-				raise KeyError(f"Primary observation key '{primary_obs_key}' (from cfg.obs) not found in cfg.obs_shape dictionary. Available keys: {list(self.cfg.obs_shape.keys())}")
-			shape = self.cfg.obs_shape[primary_obs_key]
-			return {'shape': shape, 'dtype': spec_dtype}
-		elif spec_shape_key == 'action_shape':
-			# Use the action_shape directly from cfg
-			return {'shape': self.action_shape, 'dtype': spec_dtype}
-		elif spec_shape_key == 'next_obs':
-			# Also use the primary obs shape for next_obs
-			primary_obs_key = getattr(self.cfg, 'obs', 'state') 
-			if primary_obs_key not in self.cfg.obs_shape:
-				raise KeyError(f"Primary observation key '{primary_obs_key}' (from cfg.obs) not found in cfg.obs_shape dictionary for next_obs. Available keys: {list(self.cfg.obs_shape.keys())}")
-			shape = self.cfg.obs_shape[primary_obs_key]
-			return {'shape': shape, 'dtype': spec_dtype}
-		else: # Handles fixed shapes like (1,)
-			return {'shape': tuple(spec_shape_key), 'dtype': spec_dtype}
-
-	def _prepare_batch(self, batch):
-		"""Prepare batch for training by selecting relevant data and reshaping."""
-		# Ensure stack dim is handled correctly if present (e.g., from frame stacking)
-		obs = batch['obs'][..., :self.cfg.obs_dim*self.frame_stack]
-		action = batch['action']
-		reward = batch['reward']
-		next_obs = batch['next_obs'][..., :self.cfg.obs_dim*self.frame_stack]
-		terminated = batch['terminated']
-		truncated = batch['truncated']
-		task = batch.get('task', None) # Get task if available
-
-		# Prepare batch for TD-MPC2 (sequences of length H+1)
-		if self.cfg.agent_type == 'tdmpc':
-			obs = obs[:, :self.horizon+1]
-			action = action[:, :self.horizon]
-			reward = reward[:, :self.horizon]
-			# task = task[:, 0] if task is not None else None # Task is consistent across the sequence
-
-		# Prepare batch for D-MPC (sequences of length F+1)
-		elif self.cfg.agent_type == 'dmpc':
-			F = self.cfg.horizon # D-MPC forecast horizon
-			obs_seq = batch['obs'] # Shape: (B, F+1, ObsDim)
-			action_seq = batch['action'][:, :-1] # Shape: (B, F, ActDim) - Drop last action
-			reward_seq = batch['reward'][:, :-1] # Shape: (B, F, 1) - Drop last reward
-			terminated_seq = batch['terminated'][:, :-1] # Shape: (B, F, 1) - Drop last terminated flag
-
-			# Ensure consistency for DMPC: actions, rewards, terminated flags are for F steps
-			# Tasks should be consistent across the sequence sampled
-			if self.cfg.multitask:
-				# Task is sampled per sequence, should be (B, 1) or similar, take the first task_id
-				task = batch['task'][:, 0] # Shape (B,)
-				batch = {'obs': obs_seq, 'action': action_seq, 'reward': reward_seq, 'terminated': terminated_seq, 'task': task}
-			else:
-				batch = {'obs': obs_seq, 'action': action_seq, 'reward': reward_seq, 'terminated': terminated_seq}
-
-		else: # Assume TD-MPC2 (or other non-DMPC)
-			o = batch['obs'][:, :-1]
-			a = batch['action'][:, 1:]
-			r = batch['reward'][:, 1:]
-			next_o = batch['obs'][:, 1:]
-			done_key = 'terminated' if 'terminated' in batch.keys() else 'done'
-			d = batch[done_key][:, 1:].float()
-
-			# Ensure batch has task_id if multitask=True
-			task = batch.get('task')
-			if self.cfg.multitask and task is not None:
-				task = task[:, 0] # Take the task ID from the first step of the sequence
-				batch = {'obs': o, 'action': a, 'reward': r, 'next_obs': next_o, 'done': d, 'task': task}
-			else:
-				batch = {'obs': o, 'action': a, 'reward': r, 'next_obs': next_o, 'done': d}
-
-		# Final processing: Move to device
-		for k, v in batch.items():
-			batch[k] = v.to(self.device, non_blocking=True)
-
-		return TensorDict(batch, batch_size=batch_size, device=self.device)
+		print(f"Initialized simple episode buffer with capacity for {self.capacity} transitions")
 
 	def add(self, data: TensorDict):
-		"""Add a transition (TensorDict) to the buffer."""
-		# Store episode index as a scalar (0-dim tensor)
-		data['episode'] = torch.tensor(self._current_episode, dtype=torch.int64)
-		# Ensure all expected keys are present and have batch dim [1, ...]
-		processed_data = {}
-		for key in self.keys + ['episode']: # Include episode key for sampler
+		"""Add transitions to the buffer, either individually or in batches.
+		Will accumulate transitions into episodes and store complete episodes.
+		"""
+		# Handle batch data (episode chunks)
+		if data.batch_size and len(data.batch_size) > 0 and data.batch_size[0] > 1:
+			batch_size = data.batch_size[0]
+			
+			# Process each transition in batch
+			for i in range(batch_size):
+				# Extract single transition
+				transition = {k: data[k][i].clone() for k in data.keys()}
+				single_td = TensorDict(transition, batch_size=[])
+				
+				# Add transition to current episode
+				self._add_single_transition(single_td)
+		else:
+			# Add single transition
+			self._add_single_transition(data)
+	
+	def _add_single_transition(self, data: TensorDict):
+		"""Process and add a single transition to the current episode."""
+		# Process transition data
+		processed = {}
+		
+		# Process each key
+		for key in self.keys:
 			if key not in data:
-				if key == 'terminated' and 'done' in data: # Use 'done' if 'terminated' not provided
+				if key == 'terminated' and 'done' in data:
 					val = data['done']
-				elif key == 'done' and 'terminated' in data: # Use 'terminated' if 'done' not provided
+				elif key == 'done' and 'terminated' in data:
 					val = data['terminated']
-				elif key == 'task' and 'task' not in data and self.cfg.get('multitask', False):
-					# Handle missing task if multitask is enabled (should not happen ideally)
-					print("Warning: Missing 'task' key in data for multitask setup. Using dummy value 0.")
-					val = torch.tensor([0], dtype=COLLECTION_SPECS['task']['dtype'])
-				elif key in ['terminated', 'done', 'task']:
-					# Skip optional keys if not present and not handled above
-					continue
+				elif key == 'task' and not self.multitask:
+					continue  # Skip task if not multitask
+				elif key == 'task' and self.multitask:
+					val = torch.tensor([0], dtype=torch.int64)  # Default task
+				elif key in ['terminated', 'done']:
+					val = torch.tensor([False], dtype=torch.bool)  # Default not terminated
 				else:
-					raise KeyError(f"Key '{key}' missing from data dict added to buffer.")
+					raise KeyError(f"Key '{key}' missing from data and no default available")
 			else:
 				val = data[key]
 
-			# Ensure value is a tensor 
+			# Ensure tensor type and correct shape
 			if not isinstance(val, torch.Tensor):
-				val = torch.tensor(val)
-			
-			# --- REMOVED shape manipulation --- 
-			# Keep original shape (e.g., [39] for obs, [1] for reward)
-			# The TensorDict below will represent a single step (batch_size=[])
-			# --- End REMOVED shape manipulation --- 
-			
-			# Store with the correct key name
-			processed_data[key] = val.to(self.device)
+				try:
+					val = torch.tensor(val)
+				except:
+					print(f"Warning: Could not convert '{key}' to tensor, using default")
+					if key in ['terminated', 'done', 'truncated']:
+						val = torch.tensor([False], dtype=torch.bool)
+					elif key == 'reward':
+						val = torch.tensor([0.0], dtype=torch.float32)
+					elif key == 'task' and self.multitask:
+						val = torch.tensor([0], dtype=torch.int64)
+					else:
+						continue  # Skip this key
+						
+			# Add to current episode
+			processed[key] = val.to(self.device)
 
-		# Initialize storage specs on first add
-		if not self._initialized:
-			# Let LazyTensorStorage infer specs automatically from the first added TensorDict
-			# which now has correctly shaped tensors representing a single step.
-			self._initialized = True
-
-		# Add data point as a TensorDict representing a single step
-		td_to_add = TensorDict(processed_data, batch_size=[], device=self.device)
-		self.buffer.add(td_to_add)
-		self._num_samples += 1
-		self._current_step += 1
-
-		# Check if episode ended
-		# Use 'done' or 'terminated' depending on what's available/relevant
-		end_key = 'terminated' if 'terminated' in processed_data else 'done'
-		if end_key in processed_data and processed_data[end_key].item():
-			self._current_episode += 1
-			self._current_step = 0
-
-	def sample(self, batch_size=None) -> TensorDict:
-		"""Sample a batch of sequences from the buffer."""
-		batch_size = batch_size if batch_size is not None else self.cfg.batch_size
-		if self._num_samples < self.cfg.seed_steps + self.cfg.horizon +1: # Ensure enough samples for a full sequence + seed steps
-			raise ValueError(f"Buffer has {self._num_samples} samples, but need at least {self.cfg.seed_steps + self.cfg.horizon + 1} for sampling.")
-
-		# Sample a batch of sequences using torchrl's sampler
-		try:
-			raw_batch = self.buffer.sample(batch_size=batch_size)
-		except Exception as e:
-			# Catch potential errors during sampling (e.g., empty buffer after eviction)
-			print(f"Error during buffer sampling: {e}")
-			# Maybe add a retry mechanism or simply raise a more informative error
-			raise ValueError("Failed to sample from buffer. Buffer might be empty or corrupted.") from e
-
-		# Prepare the batch based on the agent type
-		batch = TensorDict({}, batch_size=[batch_size], device=self.device)
-		F = self.cfg.horizon # D-MPC forecast horizon
-
-		# --- D-MPC Batch Preparation ---
-		if self.cfg.agent_type == 'dmpc':
-			# In case sampler returns (B, ObsDim) instead of (B, T, ObsDim)
-			F = self.cfg.horizon # D-MPC forecast horizon
-			
-			# -- SHAPE CHECK & FIX: Ensure raw_batch['obs'] is 3D --
-			# Expected: (B, F+1, ObsDim), Often actual: (B, ObsDim)
-			if 'obs' in raw_batch:
-				obs = raw_batch['obs']
-				# Get observation dimension from cfg.obs_shape
-				obs_key = getattr(self.cfg, 'obs', 'state') # Get primary obs key (default to 'state')
-				obs_dim = self.cfg.obs_shape[obs_key][0] # First element of the shape tuple
+		# Add to accumulator
+		self._current_episode.append(processed)
+		
+		# Check if should end episode (based on terminated flag)
+		is_terminated = False
+		if 'terminated' in processed:
+			try:
+				is_terminated = processed['terminated'].item() if processed['terminated'].numel() == 1 else processed['terminated'].any().item()
+			except:
+				pass
 				
-				if obs.ndim == 2 and obs.shape[1] == obs_dim:
-					print(f"[Buffer Sample] Reshaping 2D obs {obs.shape} -> 3D with sequence length {F+1}")
-					B = obs.shape[0]
-					# Reshape (B, ObsDim) -> (B, 1, ObsDim) and repeat sequence dim
-					# This artificially creates F+1 identical timesteps
-					batch['obs'] = obs.unsqueeze(1).repeat(1, F+1, 1).to(self.device)
-				else:
-					# Normal case: Observations have F+1 steps (0 to F)
-					batch['obs'] = raw_batch['obs'][:, :F+1].to(self.device) # Shape: (B, F+1, ObsDim)
-			else:
-				raise ValueError("obs key missing from raw_batch")
-
-			# -- SHAPE CHECK & FIX: Ensure action, reward, terminated are 3D --
-			# Actions: Shape (B, F, ActDim)
-			if 'action' in raw_batch:
-				action = raw_batch['action']
-				if action.ndim == 2 and action.shape[1] == self.action_shape[0]:
-					B = action.shape[0]
-					# Reshape and repeat for sequence
-					batch['action'] = action.unsqueeze(1).repeat(1, F, 1).to(self.device)
-				else:
-					batch['action'] = raw_batch['action'][:, :F].to(self.device)
-			else:
-				raise ValueError("action key missing from raw_batch")
+		# Force end episode if it gets too long
+		if len(self._current_episode) >= self.episode_length:
+			is_terminated = True
 			
-			# Rewards: Shape (B, F, 1)
-			if 'reward' in raw_batch:
-				reward = raw_batch['reward']
-				if reward.ndim == 2 and reward.shape[1] == 1:
-					B = reward.shape[0]
-					batch['reward'] = reward.unsqueeze(1).repeat(1, F, 1).to(self.device)
-				else:
-					batch['reward'] = raw_batch['reward'][:, :F].to(self.device)
-			else:
-				raise ValueError("reward key missing from raw_batch")
+		# End episode if terminated
+		if is_terminated:
+			self._complete_current_episode()
+				
+	def _complete_current_episode(self):
+		"""Finalize current episode and add to buffer."""
+		# Skip empty episodes
+		if not self._current_episode:
+			return
 			
-			# Terminated: Shape (B, F, 1)
-			if 'terminated' in raw_batch:
-				terminated = raw_batch['terminated']
-				if terminated.ndim == 2 and terminated.shape[1] == 1:
-					B = terminated.shape[0]
-					batch['terminated'] = terminated.unsqueeze(1).repeat(1, F, 1).to(dtype=torch.bool, device=self.device)
-				else:
-					batch['terminated'] = raw_batch['terminated'][:, :F].to(dtype=torch.bool, device=self.device)
-			else:
-				raise ValueError("terminated key missing from raw_batch")
+		episode_length = len(self._current_episode)
+		
+		# Only add episodes that are at least as long as minimum sequence length
+		if episode_length >= self.min_seq_length:
+			# Combine all transitions into a single TensorDict
+			episode_data = {}
+			
+			# Stack tensors for each key
+			for key in self.keys:
+				if all(key in t for t in self._current_episode):
+					try:
+						# Try to stack tensors
+						tensors = [t[key] for t in self._current_episode]
+						episode_data[key] = torch.stack(tensors)
+					except:
+						# If stacking fails, skip this key
+						print(f"Warning: Failed to stack tensors for key '{key}'")
+						
+			# Only add episode if it has required keys
+			required_keys = ['obs', 'action', 'reward']
+			if self.multitask:
+				required_keys.append('task')
+				
+			if all(k in episode_data for k in required_keys):
+				episode_td = TensorDict(episode_data, batch_size=[episode_length])
+				
+				# Add to episodes deque
+				self._episodes.append(episode_td)
+				self._num_transitions += episode_length
+				
+				if self.debug:
+					print(f"Added episode {self._current_episode_idx} with {episode_length} transitions")
+					
+				# Update episode index
+				self._current_episode_idx += 1
+				
+		# Reset current episode
+		self._current_episode = []
+		
+		# Remove oldest episodes if over capacity
+		while self._num_transitions > self.capacity and self._episodes:
+			removed = self._episodes.popleft()
+			self._num_transitions -= removed.shape[0]
 
-			# Task ID (if multitasking): Use the task ID of the first step in the sequence
-			if self.cfg.multitask and 'task' in raw_batch.keys():
-				# Ensure task has the right shape and select the first task ID
-				if raw_batch['task'].ndim > 2: # Expects (B, F+1, 1 or more)
-					batch['task'] = raw_batch['task'][:, 0].to(self.device) # Shape: (B, 1 or more)
-				else: # Should already be (B, 1) or similar if stored per-episode
-					batch['task'] = raw_batch['task'].to(self.device) # Shape: (B, 1 or more)
+	def sample(self, batch_size=None):
+		"""Sample a batch of sequences with length horizon+1 from the buffer."""
+		batch_size = batch_size if batch_size is not None else self.cfg.batch_size
+		
+		# Check if we have enough data
+		if not self._episodes:
+			raise ValueError("Buffer is empty, cannot sample")
+			
+		if self._num_transitions < batch_size * self.min_seq_length:
+			raise ValueError(f"Not enough transitions in buffer: {self._num_transitions} < {batch_size * self.min_seq_length}")
 
-		# --- TD-MPC2 Batch Preparation ---
-		elif self.cfg.agent_type == 'tdmpc2':
-			# TD-MPC2 expects flat batches, often handled within its own update logic
-			# For simplicity here, we can provide the sequence and let TDMPC2 handle it,
-			# or flatten it if TDMPC2's update expects that.
-			# Let's provide the sequence for now. TDMPC2._prepare_batch likely handles flattening.
-			# Note: TD-MPC2 horizon might differ, but SliceSampler uses cfg.horizon.
-			# This assumes cfg.horizon is consistent or TD-MPC2 adjusts internally.
-			seq_len = self.cfg.horizon + 1 # Sequence length from sampler
-			batch = raw_batch[:, :seq_len].to(self.device) # Take the sampled sequence length
+		# Sample batch_size sequences
+		sampled_batch = {}
+		
+		# Try up to 100 times to sample a valid batch
+		for _ in range(100):
+			try:
+				# Sample random episodes and starting positions
+				batch_obs = []
+				batch_action = []
+				batch_reward = []
+				batch_terminated = []
+				batch_task = [] if self.multitask else None
+				
+				# Sample sequences
+				for _ in range(batch_size):
+					# Sample random episode
+					episode = random.choice(self._episodes)
+					episode_length = episode.shape[0]
+					
+					# Only sample from episodes that are long enough
+					if episode_length < self.min_seq_length:
+						continue
+						
+					# Random starting position that leaves room for a sequence
+					max_start = episode_length - self.min_seq_length
+					start_idx = random.randint(0, max_start)
+					
+					# Extract sequence
+					obs_seq = episode['obs'][start_idx:start_idx + self.min_seq_length]
+					action_seq = episode['action'][start_idx:start_idx + self.min_seq_length - 1]  # One less action
+					reward_seq = episode['reward'][start_idx:start_idx + self.min_seq_length - 1]  # One less reward
+					
+					# Extract terminated if available, or create zeros
+					if 'terminated' in episode:
+						terminated_seq = episode['terminated'][start_idx:start_idx + self.min_seq_length - 1]
+					else:
+						terminated_seq = torch.zeros(self.min_seq_length - 1, 1, dtype=torch.bool, device=self.device)
+						
+					# Extract task if needed
+					if self.multitask and 'task' in episode:
+						task = episode['task'][start_idx]  # Just need one task value
+						batch_task.append(task)
+						
+					# Add to batch
+					batch_obs.append(obs_seq)
+					batch_action.append(action_seq)
+					batch_reward.append(reward_seq)
+					batch_terminated.append(terminated_seq)
 
-		else:
-			raise ValueError(f"Unsupported agent_type: {self.cfg.agent_type}")
-
-		# Move batch to the configured device (redundant if done above, but safe)
-		# batch = batch.to(self.device) # Already moved pieces to device
-
-		return batch
+				# Stack along batch dimension
+				sampled_batch['obs'] = torch.stack(batch_obs)
+				sampled_batch['action'] = torch.stack(batch_action)
+				sampled_batch['reward'] = torch.stack(batch_reward)
+				sampled_batch['terminated'] = torch.stack(batch_terminated)
+				
+				if self.multitask and batch_task:
+					sampled_batch['task'] = torch.stack(batch_task)
+					
+				# Create TensorDict
+				batch = TensorDict(sampled_batch, batch_size=[batch_size], device=self.device)
+				
+				# Successfully created a batch
+				return batch
+				
+			except Exception as e:
+				print(f"Warning: Failed sampling attempt: {e}")
+				continue
+				
+		# If we get here, we failed to sample a valid batch
+		raise ValueError("Failed to sample a valid batch after 100 attempts")
 
 	def __len__(self):
-		return self._num_samples
+		"""Return number of transitions in buffer."""
+		return self._num_transitions
+
+	def size(self):
+		"""Return number of transitions in buffer (alias for len)."""
+		return self._num_transitions
+		
+	@property
+	def max_size(self):
+		"""Return buffer capacity."""
+		return self.capacity
 
 	def save(self, path):
 		# Placeholder: Saving buffer state might require custom logic
@@ -336,6 +285,51 @@ class Buffer:
 	def _to_device(self, *args, device=None):
 		# Placeholder for _to_device method
 		pass
+
+	def add_episode(self, **episode_data):
+		"""
+		Add a complete episode to the buffer directly.
+		
+		Args:
+			**episode_data: Dictionary of episode data with keys matching self.keys
+							Each value should be a tensor of shape [episode_length, ...]
+		"""
+		# Check if we have required keys
+		required_keys = ['obs', 'action', 'reward']
+		if self.multitask:
+			required_keys.append('task')
+			
+		if not all(k in episode_data for k in required_keys):
+			missing = [k for k in required_keys if k not in episode_data]
+			print(f"Warning: Missing required keys {missing} in episode data. Skipping.")
+			return
+			
+		# Get episode length
+		episode_length = len(episode_data['obs'])
+		
+		# Skip episodes that are too short
+		if episode_length < self.min_seq_length:
+			print(f"Warning: Episode length {episode_length} is less than minimum required length {self.min_seq_length}. Skipping.")
+			return
+			
+		# Create TensorDict from episode data
+		episode_td = TensorDict(episode_data, batch_size=[episode_length])
+		
+		# Move to buffer device
+		for k in episode_td.keys():
+			episode_td[k] = episode_td[k].to(self.device)
+		
+		# Add to episodes deque
+		self._episodes.append(episode_td)
+		self._num_transitions += episode_length
+		
+		if self.debug:
+			print(f"Added complete episode with {episode_length} transitions")
+			
+		# Remove oldest episodes if over capacity
+		while self._num_transitions > self.capacity and self._episodes:
+			removed = self._episodes.popleft()
+			self._num_transitions -= removed.shape[0]
 
 def test_buffer():
 	print('Running buffer test...')
@@ -382,7 +376,7 @@ def test_buffer():
 		buffer.add(data)
 		print(f'Added episode {ep_idx}, buffer length: {len(buffer)}')
 
-	print(f'Buffer capacity: {buffer.capacity}, Num samples: {buffer._num_samples}')
+	print(f'Buffer capacity: {buffer.capacity}, Num samples: {buffer._num_transitions}')
 
 	# Sample a batch
 	try:

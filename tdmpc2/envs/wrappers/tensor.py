@@ -33,8 +33,9 @@ class TensorWrapper(gym.Wrapper):
 			obs = self._try_f32_tensor(obs)
 		return obs
 
-	def reset(self, task_idx=None):
-		return self._obs_to_tensor(self.env.reset())
+	def reset(self, **kwargs):
+		# Pass kwargs down to the wrapped environment's reset
+		return self._obs_to_tensor(self.env.reset(**kwargs))
 
 	def step(self, action):
 		# Check if action is a Tensor, convert to numpy if needed

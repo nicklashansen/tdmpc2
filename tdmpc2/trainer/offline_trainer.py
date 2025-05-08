@@ -282,7 +282,7 @@ class OfflineTrainer(Trainer):
 			
 			for ep_idx in range(self.cfg.eval_episodes):
 				# Use task=task_idx as a keyword argument instead of positional
-				obs, done, ep_reward, t = eval_env.reset(task=task_idx), False, 0, 0
+				obs, done, ep_reward, t = eval_env.reset(task=self.cfg.tasks[task_idx]), False, 0, 0
 				ep_start_time = time()
 				while not done:
 					step_start_time = time()
