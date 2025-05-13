@@ -36,19 +36,18 @@ You will need a machine with a GPU and at least 12 GB of RAM for single-task onl
 We provide a `Dockerfile` for easy installation. You can build the docker image by running
 
 ```
-cd docker && docker build . -t <user>/tdmpc2:1.0.0
+cd docker && docker build . -t <user>/tdmpc2:1.0.1
 ```
 
-This docker image contains all dependencies needed for running DMControl, Meta-World, and ManiSkill2 experiments.
+This docker image contains all dependencies needed for running DMControl. We also provide a pre-built docker image [here](https://hub.docker.com/repository/docker/nicklashansen/tdmpc2/tags/1.0.1/sha256-b07d4e04d4b28ffd9a63ac18ec1541950e874bb51d276c7d09b36135f170dd93).
 
-If you prefer to install dependencies manually, start by installing dependencies via `conda` by running the following command:
+If you prefer to use `conda` rather than docker, start by running the following command:
 
 ```
 conda env create -f docker/environment.yaml
-pip install gym==0.21.0
 ```
 
-The `environment.yaml` file installs dependencies required for training on DMControl tasks. Other domains can be installed by following the instructions in `environment.yaml`.
+The `docker/environment.yaml` file installs dependencies required for training on DMControl tasks. Other domains can be installed by following the instructions in `docker/environment.yaml`.
 
 If you want to run ManiSkill2, you will additionally need to download and link the necessary assets by running
 
@@ -62,13 +61,13 @@ which downloads assets to `./data`. You may move these assets to any location. T
 export MS2_ASSET_DIR=<path>/<to>/<data>
 ```
 
-and restart your terminal. Meta-World additionally requires MuJoCo 2.1.0. We host the unrestricted MuJoCo 2.1.0 license (courtesy of Google DeepMind) at [https://www.tdmpc2.com/files/mjkey.txt](https://www.tdmpc2.com/files/mjkey.txt). You can download the license by running
+and restart your terminal. Note that Meta-World requires MuJoCo 2.1.0 and `gym==0.21.0` which is becoming increasingly difficult to install. We host the unrestricted MuJoCo 2.1.0 license (courtesy of Google DeepMind) at [https://www.tdmpc2.com/files/mjkey.txt](https://www.tdmpc2.com/files/mjkey.txt). You can download the license by running
 
 ```
 wget https://www.tdmpc2.com/files/mjkey.txt -O ~/.mujoco/mjkey.txt
 ```
 
-See `docker/Dockerfile` for installation instructions if you do not already have MuJoCo 2.1.0 installed. MyoSuite requires `gym==0.13.0` which is incompatible with Meta-World and ManiSkill2. Install separately with `pip install myosuite` if desired. Depending on your existing system packages, you may need to install other dependencies. See `docker/Dockerfile` for a list of recommended system packages.
+Depending on your existing system packages, you may need to install other dependencies. See `docker/Dockerfile` for a list of recommended system packages.
 
 ----
 
@@ -87,7 +86,7 @@ This codebase provides support for all **104** continuous control tasks from **D
 | myosuite  | myo-key-turn
 | myosuite  | myo-key-turn-hard
 
-which can be run by specifying the `task` argument for `evaluation.py`. Multi-task training and evaluation is specified by setting `task=mt80` or `task=mt30` for the 80-task and 30-task sets, respectively. We also provide basic support for other MuJoCo/Box2d Gymnasium tasks; refer to the `envs` directory for a list of tasks. It should be relatively straightforward to add support for custom tasks by following the examples in `envs`.
+which can be run by specifying the `task` argument for `evaluation.py`. Multi-task training and evaluation is specified by setting `task=mt80` or `task=mt30` for the 80-task and 30-task sets, respectively. While you generally do not need to access the underlying task IDs or embeddings during training or evaluation of our multi-task models, the mapping from task name to task embedding used in our work can be found [here](https://github.com/nicklashansen/tdmpc2/blob/7ec6bc83a82a5188ca3faddc59aea83f430ab570/tdmpc2/common/__init__.py#L26). As of April 2025, our codebase also provides basic support for other MuJoCo/Box2d Gymnasium tasks; refer to the `envs` directory for a list of tasks. It should be relatively straightforward to add support for custom tasks by following the examples in `envs`.
 
 **Note:** we also provide support for image observations in the DMControl tasks. Use argument `obs=rgb` if you wish to train visual policies.
 
