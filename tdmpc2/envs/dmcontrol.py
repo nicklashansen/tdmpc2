@@ -101,6 +101,9 @@ class Pixels(gym.Wrapper):
 	def close(self):
 		self.env.close()
 
+	def close(self):
+		self.env.close()
+
 
 def make_env(cfg):
 	"""
