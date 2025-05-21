@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
+from gymnasium.vector import AsyncVectorEnv
 import numpy as np
 import torch
 
@@ -21,8 +21,7 @@ class Vectorized():
 			return env_fn(_cfg)
 
 		print(f'Creating {cfg.num_envs} environments...')
-		# self.env = AsyncVectorEnv([make for _ in range(cfg.num_envs)])
-		self.env = SyncVectorEnv([make for _ in range(cfg.num_envs)])
+		self.env = AsyncVectorEnv([make for _ in range(cfg.num_envs)])
 		env = make()
 		self.observation_space = env.observation_space
 		self.action_space = env.action_space

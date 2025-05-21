@@ -124,6 +124,8 @@ class OnlineTrainer(Trainer):
 				for _ in range(num_updates):
 					_train_metrics = self.agent.update(self.buffer)
 				train_metrics.update(_train_metrics)
+				if self._step == self.cfg.seed_steps:
+					print('Pretraining complete.')
 
 			self._step += self.cfg.num_envs
 	

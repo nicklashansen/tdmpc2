@@ -77,4 +77,8 @@ def parse_cfg(cfg: OmegaConf) -> OmegaConf:
 		cfg.task_dim = 0
 	cfg.tasks = TASK_SET.get(cfg.task, [cfg.task])
 
+	# Ensure that eval_episodes is divisible by num_envs and is at least 1*num_envs
+	cfg.eval_episodes = max(cfg.eval_episodes, cfg.num_envs)
+	cfg.eval_episodes = cfg.eval_episodes - (cfg.eval_episodes % cfg.num_envs)
+
 	return cfg_to_dataclass(cfg)
