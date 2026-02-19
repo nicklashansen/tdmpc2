@@ -85,6 +85,8 @@ This codebase provides support for all **104** continuous control tasks from **D
 | maniskill | pick-ycb
 | myosuite  | myo-key-turn
 | myosuite  | myo-key-turn-hard
+| ogbench   | ogb-humanoidmaze-large-navigate-v0
+| ogbench   | ogb-cube-double-play-singletask-v0
 
 which can be run by specifying the `task` argument for `evaluation.py`. Multi-task training and evaluation is specified by setting `task=mt80` or `task=mt30` for the 80-task and 30-task sets, respectively. While you generally do not need to access the underlying task IDs or embeddings during training or evaluation of our multi-task models, the mapping from task name to task embedding used in our work can be found [here](https://github.com/nicklashansen/tdmpc2/blob/7ec6bc83a82a5188ca3faddc59aea83f430ab570/tdmpc2/common/__init__.py#L26). As of April 2025, our codebase also provides basic support for other MuJoCo/Box2d Gymnasium tasks; refer to the `envs` directory for a list of tasks. It should be relatively straightforward to add support for custom tasks by following the examples in `envs`.
 

@@ -2,14 +2,14 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: dog-run
+task: ogb-pointmaze-medium-navigate-v0
 obs: state
 episodic: false
 
 # evaluation
 checkpoint: ???
 eval_episodes: 10
-eval_freq: 50000
+eval_freq: 20_000
 
 # training
 steps: 10_000_000
@@ -52,7 +52,7 @@ vmin: -10
 vmax: +10
 
 # architecture
-model_size: ???
+model_size: 5
 num_enc_layers: 2
 enc_dim: 256
 num_channels: 32
@@ -64,7 +64,7 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: tdmpc2-cartpole-testing
+wandb_project: tdmpc2-ogbench
 wandb_entity: 
 wandb_silent: false
 enable_wandb: true
