@@ -2,17 +2,17 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: ogb-pointmaze-medium-navigate-v0
+task: ogb-pointmaze-medium-navigate-singletask-v0
 obs: state
-episodic: false
+episodic: true
 
 # evaluation
 checkpoint: ???
 eval_episodes: 10
-eval_freq: 20_000
+eval_freq: 10_000
 
 # training
-steps: 10_000_000
+steps: 100_000
 batch_size: 256
 reward_coef: 0.1
 value_coef: 0.1
@@ -27,7 +27,7 @@ discount_denom: 5
 discount_min: 0.95
 discount_max: 0.995
 buffer_size: 1_000_000
-exp_name: default
+exp_name: default123
 data_dir: ???
 
 # planning
@@ -83,7 +83,7 @@ multitask: ???
 tasks: ???
 obs_shape: ???
 action_dim: ???
-episode_length: ???
+episode_length: 200
 obs_shapes: ???
 action_dims: ???
 episode_lengths: ???

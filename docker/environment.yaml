@@ -15,7 +15,7 @@ dependencies:
   - pip:
     - dm-control==1.0.16
     - glfw==2.7.0
-    - gymnasium==0.29.1
+    #- gymnasium==0.29.1
     - ffmpeg==1.4
     - imageio==2.34.1
     - imageio-ffmpeg==0.4.9
@@ -38,16 +38,16 @@ dependencies:
     ####################
     # Gym:
     # (unmaintained but required for maniskill2/meta-world)
-    - "cython<3"
-    - wheel==0.38.0
-    - setuptools==65.5.0
-    - mujoco==2.3.1
-    - mujoco-py==2.1.2.14
-    - gym==0.21.0
+    #- "cython<3"
+    #- wheel==0.38.0
+    #- setuptools==65.5.0
+    #- mujoco==2.3.1
+    #- mujoco-py==2.1.2.14
+    #- gym==0.21.0
     ####################
     # ManiSkill2:
     # (requires gym==0.21.0 which occasionally breaks)
-    - mani-skill2==0.4.1
+    #- mani-skill2==0.4.1
     ####################
     # Meta-World:
     # (requires gym==0.21.0 which occasionally breaks)

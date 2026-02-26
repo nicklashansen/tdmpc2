@@ -9,9 +9,11 @@ OGBENCH_TASKS = {
     # Format: 'ogb-<alias>': '<dataset_name>'
     'ogb-humanoidmaze-large-navigate': 'humanoidmaze-large-navigate-v0',
     'ogb-antmaze-large-navigate': 'antmaze-large-navigate-v0',
+    'ogb-antmaze-medium-navigate': 'antmaze-medium-navigate-v0',
     'ogb-cube-double-play': 'cube-double-play-singletask-v0',
     'ogb-cube-single-play': 'cube-single-play-singletask-v0',
     'ogb-scene-play': 'scene-play-singletask-v0',
+    'ogb-cube-single-play-singletask-v0': 'cube-single-play-singletask-v0',
 }
 
 
@@ -19,6 +21,7 @@ class OGBenchWrapper(gym.Wrapper):
     """
     Wrapper for OGBench environments.
     Converts OGBench environments to be compatible with TD-MPC2.
+    Supports goal-conditioned environments by appending goal vectors to state observations.
     """
     
     def __init__(self, env, cfg):
@@ -26,8 +29,13 @@ class OGBenchWrapper(gym.Wrapper):
         self.env = env
         self.cfg = cfg
         
+        # Determine if the task is goal-conditioned
+        # Goal-conditioned tasks don't contain "single-task" in their name
+        self.is_goal_conditioned = "single-task" not in cfg.task.lower()
+        
         # Setup observation and action spaces
         self.observation_space = self.env.observation_space
+        self._goal = None  # Store goal for appending to observations
         
         # Ensure action space is properly bounded
         if hasattr(self.env.action_space, 'low') and hasattr(self.env.action_space, 'high'):
@@ -38,6 +46,72 @@ class OGBenchWrapper(gym.Wrapper):
             )
         else:
             self.action_space = self.env.action_space
+    
+    def _extract_goal_from_observation(self, obs, info):
+        """
+        Extract goal from observation or info dict.
+        
+        Args:
+            obs: Observation from environment (dict or array)
+            info: Info dict from environment
+            
+        Returns:
+            goal: Goal vector or None if not found
+        """
+        # Check if observation is a dict with 'goal' key
+        if isinstance(obs, dict) and 'goal' in obs:
+            return obs['goal']
+        
+        # Check if goal is in info dict
+        if isinstance(info, dict) and 'goal' in info:
+            return info['goal']
+        
+        return None
+    
+    def _append_goal_to_obs(self, obs, goal):
+        """
+        Append goal vector to observation.
+        
+        Args:
+            obs: Original observation (dict or array)
+            goal: Goal vector to append
+            
+        Returns:
+            Combined observation (array with goal appended)
+        """
+        if goal is None:
+            # If no goal, return obs as-is (as array)
+            if isinstance(obs, dict) and 'observation' in obs:
+                return obs['observation']
+            elif isinstance(obs, dict):
+                # Convert dict to array if needed
+                return np.concatenate([v.flatten() if isinstance(v, np.ndarray) else [v] 
+                                      for v in obs.values()])
+            return obs
+        
+        # Extract state vector from observation
+        if isinstance(obs, dict) and 'observation' in obs:
+            state = obs['observation']
+        elif isinstance(obs, dict):
+            # Flatten all dict values except goal
+            state = np.concatenate([v.flatten() if isinstance(v, np.ndarray) else [v] 
+                                   for k, v in obs.items() if k != 'goal'])
+        else:
+            state = obs
+        
+        # Ensure state and goal are numpy arrays
+        if isinstance(state, np.ndarray):
+            state = state.flatten()
+        else:
+            state = np.array(state).flatten()
+            
+        if isinstance(goal, np.ndarray):
+            goal = goal.flatten()
+        else:
+            goal = np.array(goal).flatten()
+        
+        # Concatenate state and goal
+        return np.concatenate([state, goal])
     
     def __del__(self):
         """Ensure proper cleanup of environment resources."""
@@ -50,6 +124,12 @@ class OGBenchWrapper(gym.Wrapper):
     def reset(self, **kwargs):
         """Reset environment and return initial observation."""
         obs, info = self.env.reset(**kwargs)
+        
+        # Extract and store goal if goal-conditioned
+        if self.is_goal_conditioned:
+            self._goal = self._extract_goal_from_observation(obs, info)
+            obs = self._append_goal_to_obs(obs, self._goal)
+        
         return obs
     
     def step(self, action):
@@ -65,6 +145,11 @@ class OGBenchWrapper(gym.Wrapper):
             info['terminated'] = terminated
             if done:
                 break
+        
+        # Extract and append goal if goal-conditioned
+        if self.is_goal_conditioned:
+            self._goal = self._extract_goal_from_observation(obs, info)
+            obs = self._append_goal_to_obs(obs, self._goal)
         
         # TD-MPC2 expects (obs, reward, done, info)
         return obs, reward, done, info
@@ -120,12 +205,8 @@ def make_env(cfg):
     # Wrap the environment
     env = OGBenchWrapper(env, cfg)
     
-    # Add timeout wrapper (default to 200 steps, adjust based on task)
-    max_steps = getattr(env.unwrapped, 'max_episode_steps', 200)
+    # Add timeout wrapper with episode length from config (default 200)
+    max_steps = getattr(cfg, 'episode_length', 200)
     env = Timeout(env, max_episode_steps=max_steps)
-    try:
-        env.max_episode_steps = env._max_episode_steps
-    except AttributeError:
-        pass
     
     return env
