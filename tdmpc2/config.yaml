@@ -2,7 +2,7 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: ogb-pointmaze-medium-navigate-singletask-v0
+task: pointmaze-medium-navigate-singletask-v0
 obs: state
 episodic: true
 

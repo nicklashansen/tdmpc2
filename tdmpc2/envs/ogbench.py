@@ -4,19 +4,6 @@ import ogbench
 from envs.wrappers.timeout import Timeout
 
 
-# OGBench task aliases (optional shorthand). Use full dataset names when possible.
-OGBENCH_TASKS = {
-    # Format: 'ogb-<alias>': '<dataset_name>'
-    'ogb-humanoidmaze-large-navigate': 'humanoidmaze-large-navigate-v0',
-    'ogb-antmaze-large-navigate': 'antmaze-large-navigate-v0',
-    'ogb-antmaze-medium-navigate': 'antmaze-medium-navigate-v0',
-    'ogb-cube-double-play': 'cube-double-play-singletask-v0',
-    'ogb-cube-single-play': 'cube-single-play-singletask-v0',
-    'ogb-scene-play': 'scene-play-singletask-v0',
-    'ogb-cube-single-play-singletask-v0': 'cube-single-play-singletask-v0',
-}
-
-
 class OGBenchWrapper(gym.Wrapper):
     """
     Wrapper for OGBench environments.
@@ -26,16 +13,45 @@ class OGBenchWrapper(gym.Wrapper):
     
     def __init__(self, env, cfg):
         super().__init__(env)
-        self.env = env
         self.cfg = cfg
         
         # Determine if the task is goal-conditioned
-        # Goal-conditioned tasks don't contain "single-task" in their name
-        self.is_goal_conditioned = "single-task" not in cfg.task.lower()
+        # Goal-conditioned tasks don't contain "singletask" in their name
+        self.is_goal_conditioned = "singletask" not in cfg.task.lower()
         
-        # Setup observation and action spaces
-        self.observation_space = self.env.observation_space
         self._goal = None  # Store goal for appending to observations
+        
+        # Must determine actual observation dimension before __init__ completes
+        # because make_env() will read observation_space.shape right after
+        # We need to reset once to see the actual dimensions
+        sample_obs, sample_info = self.env.reset()
+        
+        if self.is_goal_conditioned:
+            # Extract state and goal dimensions
+            sample_state = self._extract_state_from_observation(sample_obs)
+            sample_goal = self._extract_goal_from_observation(sample_obs, sample_info)
+            
+            # Convert to numpy arrays and get shapes
+            state_arr = np.asarray(sample_state).astype(np.float32).flatten()
+            state_dim = int(state_arr.shape[0])  # Ensure integer, not symbolic
+            
+            if sample_goal is not None:
+                goal_arr = np.asarray(sample_goal).astype(np.float32).flatten()
+                goal_dim = int(goal_arr.shape[0])  # Ensure integer, not symbolic
+                combined_dim = state_dim + goal_dim
+            else:
+                combined_dim = state_dim
+            
+            # Set observation_space with concrete dimensions
+            self.observation_space = gym.spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(combined_dim,),
+                dtype=np.float32
+            )
+        else:
+            # For single-task environments, use original observation space
+            self.observation_space = self.env.observation_space
         
         # Ensure action space is properly bounded
         if hasattr(self.env.action_space, 'low') and hasattr(self.env.action_space, 'high'):
@@ -46,6 +62,25 @@ class OGBenchWrapper(gym.Wrapper):
             )
         else:
             self.action_space = self.env.action_space
+    
+    def _extract_state_from_observation(self, obs):
+        """
+        Extract state array from observation (handles both dict and array observations).
+        
+        Args:
+            obs: Observation from environment (dict or array)
+            
+        Returns:
+            state: State vector as numpy array
+        """
+        if isinstance(obs, dict) and 'observation' in obs:
+            return obs['observation']
+        elif isinstance(obs, dict):
+            # Flatten all dict values except goal
+            return np.concatenate([v.flatten() if isinstance(v, np.ndarray) else [v] 
+                                  for k, v in obs.items() if k != 'goal'])
+        else:
+            return obs
     
     def _extract_goal_from_observation(self, obs, info):
         """
@@ -68,50 +103,25 @@ class OGBenchWrapper(gym.Wrapper):
         
         return None
     
-    def _append_goal_to_obs(self, obs, goal):
+    def _append_goal_to_state(self, state, goal):
         """
-        Append goal vector to observation.
+        Append goal vector to state vector.
         
         Args:
-            obs: Original observation (dict or array)
+            state: State vector (numpy array or other)
             goal: Goal vector to append
             
         Returns:
-            Combined observation (array with goal appended)
+            Combined state (float32 numpy array with goal appended)
         """
-        if goal is None:
-            # If no goal, return obs as-is (as array)
-            if isinstance(obs, dict) and 'observation' in obs:
-                return obs['observation']
-            elif isinstance(obs, dict):
-                # Convert dict to array if needed
-                return np.concatenate([v.flatten() if isinstance(v, np.ndarray) else [v] 
-                                      for v in obs.values()])
-            return obs
+        # Ensure state and goal are float32 numpy arrays and flattened
+        state_arr = np.asarray(state, dtype=np.float32).flatten()
+        goal_arr = np.asarray(goal, dtype=np.float32).flatten()
         
-        # Extract state vector from observation
-        if isinstance(obs, dict) and 'observation' in obs:
-            state = obs['observation']
-        elif isinstance(obs, dict):
-            # Flatten all dict values except goal
-            state = np.concatenate([v.flatten() if isinstance(v, np.ndarray) else [v] 
-                                   for k, v in obs.items() if k != 'goal'])
-        else:
-            state = obs
-        
-        # Ensure state and goal are numpy arrays
-        if isinstance(state, np.ndarray):
-            state = state.flatten()
-        else:
-            state = np.array(state).flatten()
-            
-        if isinstance(goal, np.ndarray):
-            goal = goal.flatten()
-        else:
-            goal = np.array(goal).flatten()
-        
-        # Concatenate state and goal
-        return np.concatenate([state, goal])
+        # Concatenate state and goal, return as float32
+        return np.concatenate([state_arr, goal_arr]).astype(np.float32)
+    
+    
     
     def __del__(self):
         """Ensure proper cleanup of environment resources."""
@@ -125,12 +135,17 @@ class OGBenchWrapper(gym.Wrapper):
         """Reset environment and return initial observation."""
         obs, info = self.env.reset(**kwargs)
         
-        # Extract and store goal if goal-conditioned
+        # For goal-conditioned tasks, extract state and append goal
         if self.is_goal_conditioned:
+            state = self._extract_state_from_observation(obs)
             self._goal = self._extract_goal_from_observation(obs, info)
-            obs = self._append_goal_to_obs(obs, self._goal)
-        
-        return obs
+            
+            if self._goal is not None:
+                state = self._append_goal_to_state(state, self._goal)
+            
+            return np.asarray(state, dtype=np.float32)
+        else:
+            return obs
     
     def step(self, action):
         """
@@ -146,13 +161,21 @@ class OGBenchWrapper(gym.Wrapper):
             if done:
                 break
         
-        # Extract and append goal if goal-conditioned
+        # For goal-conditioned tasks, extract state and append stored goal.
+        # Note: OGBench only provides the goal in reset() info, not in step() info,
+        # so we reuse self._goal which was set during reset().
         if self.is_goal_conditioned:
-            self._goal = self._extract_goal_from_observation(obs, info)
-            obs = self._append_goal_to_obs(obs, self._goal)
-        
-        # TD-MPC2 expects (obs, reward, done, info)
-        return obs, reward, done, info
+            state = self._extract_state_from_observation(obs)
+            # Only update goal if a new one is found; otherwise keep the one from reset()
+            new_goal = self._extract_goal_from_observation(obs, info)
+            if new_goal is not None:
+                self._goal = new_goal
+            if self._goal is not None:
+                state = self._append_goal_to_state(state, self._goal)
+            
+            return np.asarray(state, dtype=np.float32), reward, done, info
+        else:
+            return obs, reward, done, info
     
     @property
     def unwrapped(self):
@@ -181,25 +204,16 @@ def make_env(cfg):
     Returns:
         Wrapped OGBench environment
     """
-    if not cfg.task.startswith('ogb-'):
-        raise ValueError('Unknown task:', cfg.task)
-    
-    # Resolve the dataset name for OGBench.
-    if cfg.task in OGBENCH_TASKS:
-        dataset_name = OGBENCH_TASKS[cfg.task]
-    else:
-        dataset_name = cfg.task.replace('ogb-', '', 1)
-    
     # OGBench typically uses state observations
     # If pixel observations are needed, they should be handled separately
     assert cfg.obs == 'state', 'OGBench currently only supports state observations in this implementation.'
     
     try:
         # Use OGBench helper to construct env without loading datasets.
-        env = ogbench.make_env_and_datasets(dataset_name, env_only=True)
+        env = ogbench.make_env_and_datasets(cfg.task, env_only=True)
     except Exception as e:
         raise ValueError(
-            f'Failed to create OGBench environment "{dataset_name}": {str(e)}'
+            f'Failed to create OGBench environment "{cfg.task}": {str(e)}'
         )
     
     # Wrap the environment
