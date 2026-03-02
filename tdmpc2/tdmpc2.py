@@ -5,6 +5,7 @@ from common import math
 from common.scale import RunningScale
 from common.world_model import WorldModel
 from common.layers import api_model_conversion
+from common.eikonal import speed_function
 from tensordict import TensorDict
 
 
@@ -297,6 +298,7 @@ class TDMPC2(torch.nn.Module):
 		else:
 			termination_loss = 0.
 		value_loss = value_loss / (self.cfg.horizon * self.cfg.num_q)
+
 		total_loss = (
 			self.cfg.consistency_coef * consistency_loss +
 			self.cfg.reward_coef * reward_loss +
@@ -304,32 +306,41 @@ class TDMPC2(torch.nn.Module):
 			self.cfg.value_coef * value_loss
 		)
 
-		# Update model
+		# Backward for main losses (gradients accumulate in params)
 		total_loss.backward()
-		grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.grad_clip_norm)
-		self.optim.step()
-		self.optim.zero_grad(set_to_none=True)
 
-		# Update policy
-		pi_info = self.update_pi(zs.detach(), task)
-
-		# Update target Q-functions
-		self.model.soft_update_target_Q()
-
-		# Return training statistics
-		self.model.eval()
+		# Return training statistics and data needed for eikonal + policy update
 		info = TensorDict({
 			"consistency_loss": consistency_loss,
 			"reward_loss": reward_loss,
 			"value_loss": value_loss,
 			"termination_loss": termination_loss,
 			"total_loss": total_loss,
-			"grad_norm": grad_norm,
 		})
 		if self.cfg.episodic:
 			info.update(math.termination_statistics(torch.sigmoid(termination_pred[-1]), terminated[-1]))
-		info.update(pi_info)
-		return info.detach().mean()
+		return info.detach().mean(), zs.detach()
+
+	def _eikonal_loss(self, _zs, action, task):
+		"""
+		Compute the Eikonal regularizer (Eq. 9 from arxiv:2509.06782).
+		Penalizes ||grad_z Q|| to deviate from 1, enforcing a distance-like structure.
+		Not compiled — requires create_graph=True (double backward).
+		"""
+		_zs_eik = _zs.requires_grad_(True)
+		qs_eik = self.model.Q(_zs_eik, action, task, return_type='all')
+		q_scalar = math.two_hot_inv(qs_eik, self.cfg).mean(dim=0)  # avg over Q-heads
+		grad_z = torch.autograd.grad(
+			outputs=q_scalar.sum(),
+			inputs=_zs_eik,
+			create_graph=True,
+		)[0]
+		grad_norm = grad_z.norm(dim=-1)  # [horizon, batch]
+		speed = speed_function(_zs_eik)   # S(s), shape [horizon, batch]
+		eikonal_loss = ((grad_norm * speed - 1) ** 2).mean()
+		# Backward for eikonal loss (gradients accumulate with main loss gradients)
+		(self.cfg.eikonal_coef * eikonal_loss).backward()
+		return eikonal_loss.detach()
 
 	def update(self, buffer):
 		"""
@@ -346,4 +357,30 @@ class TDMPC2(torch.nn.Module):
 		if task is not None:
 			kwargs["task"] = task
 		torch.compiler.cudagraph_mark_step_begin()
-		return self._update(obs, action, reward, terminated, **kwargs)
+
+		# Main update (compiled) — forward + main losses + backward
+		info, zs = self._update(obs, action, reward, terminated, **kwargs)
+
+		# Eikonal regularizer (not compiled — requires double backward)
+		if self.cfg.eikonal_coef > 0:
+			_zs = zs[:-1]
+			eikonal_loss = self._eikonal_loss(_zs, action, task)
+			info["eikonal_loss"] = eikonal_loss
+		else:
+			info["eikonal_loss"] = 0.
+
+		# Optimizer step (uses accumulated gradients from main + eikonal backward)
+		grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.grad_clip_norm)
+		self.optim.step()
+		self.optim.zero_grad(set_to_none=True)
+		info["grad_norm"] = grad_norm
+
+		# Update policy
+		pi_info = self.update_pi(zs, task)
+		info.update(pi_info)
+
+		# Update target Q-functions
+		self.model.soft_update_target_Q()
+
+		self.model.eval()
+		return info
