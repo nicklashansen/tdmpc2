@@ -17,6 +17,7 @@ from envs import make_env
 from tdmpc2 import TDMPC2
 from trainer.offline_trainer import OfflineTrainer
 from trainer.online_trainer import OnlineTrainer
+from trainer.ogbench_offline_trainer import OGBenchOfflineTrainer
 from common.logger import Logger
 
 torch.backends.cudnn.benchmark = True
@@ -49,7 +50,15 @@ def train(cfg: dict):
 	set_seed(cfg.seed)
 	print(colored('Work dir:', 'yellow', attrs=['bold']), cfg.work_dir)
 
-	trainer_cls = OfflineTrainer if cfg.multitask else OnlineTrainer
+	# Select trainer: offline OGBench, offline multitask (mt30/mt80), or online
+	offline_ogbench = getattr(cfg, 'offline', False) and cfg.task.startswith('ogb-')
+	if offline_ogbench:
+		trainer_cls = OGBenchOfflineTrainer
+	elif cfg.multitask:
+		trainer_cls = OfflineTrainer
+	else:
+		trainer_cls = OnlineTrainer
+
 	trainer = trainer_cls(
 		cfg=cfg,
 		env=make_env(cfg),

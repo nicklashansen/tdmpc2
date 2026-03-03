@@ -3,6 +3,15 @@ import numpy as np
 import ogbench
 from envs.wrappers.timeout import Timeout
 
+OGB_PREFIX = 'ogb-'
+
+
+def strip_ogb_prefix(task_name: str) -> str:
+    """Strip the 'ogb-' routing prefix to get the raw OGBench dataset name."""
+    if task_name.startswith(OGB_PREFIX):
+        return task_name[len(OGB_PREFIX):]
+    return task_name
+
 
 class OGBenchWrapper(gym.Wrapper):
     """
@@ -208,12 +217,15 @@ def make_env(cfg):
     # If pixel observations are needed, they should be handled separately
     assert cfg.obs == 'state', 'OGBench currently only supports state observations in this implementation.'
     
+    # Strip 'ogb-' routing prefix before calling the OGBench API
+    ogbench_task = strip_ogb_prefix(cfg.task)
+    
     try:
         # Use OGBench helper to construct env without loading datasets.
-        env = ogbench.make_env_and_datasets(cfg.task, env_only=True)
+        env = ogbench.make_env_and_datasets(ogbench_task, env_only=True)
     except Exception as e:
         raise ValueError(
-            f'Failed to create OGBench environment "{cfg.task}": {str(e)}'
+            f'Failed to create OGBench environment "{cfg.task}" (ogbench name: "{ogbench_task}"): {str(e)}'
         )
     
     # Wrap the environment

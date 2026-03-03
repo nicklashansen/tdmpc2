@@ -339,8 +339,48 @@ class TDMPC2(torch.nn.Module):
 		speed = speed_function(_zs_eik)   # S(s), shape [horizon, batch]
 		eikonal_loss = ((grad_norm * speed - 1) ** 2).mean()
 		# Backward for eikonal loss (gradients accumulate with main loss gradients)
-		(self.cfg.eikonal_coef * eikonal_loss).backward()
+		(self.cfg.eikonal_latent_value_coef * eikonal_loss).backward()
 		return eikonal_loss.detach()
+
+	def _eikonal_encoder_loss(self, obs, task):
+		"""
+		Eikonal regularizer for the encoder.
+		Penalizes ||grad_obs encode(obs)|| to deviate from 1, enforcing
+		a distance-preserving mapping from observation space to latent space.
+		Not compiled — requires create_graph=True (double backward).
+		"""
+		obs_eik = obs.detach().requires_grad_(True)
+		z_eik = self.model.encode(obs_eik, task)
+		grad_obs = torch.autograd.grad(
+			outputs=z_eik.sum(),
+			inputs=obs_eik,
+			create_graph=True,
+		)[0]
+		grad_norm = grad_obs.norm(dim=-1)
+		speed = speed_function(obs_eik)
+		eikonal_encoder_loss = ((grad_norm * speed - 1) ** 2).mean()
+		(self.cfg.eikonal_state_latent_coef * eikonal_encoder_loss).backward()
+		return eikonal_encoder_loss.detach()
+
+	def _eikonal_dynamics_loss(self, _zs, action, task):
+		"""
+		Eikonal regularizer for the latent dynamics (next-state predictor).
+		Penalizes ||grad_z next(z, a)|| to deviate from 1, enforcing
+		a distance-preserving latent transition function.
+		Not compiled — requires create_graph=True (double backward).
+		"""
+		_zs_eik = _zs.detach().requires_grad_(True)
+		next_z_eik = self.model.next(_zs_eik, action, task)
+		grad_z = torch.autograd.grad(
+			outputs=next_z_eik.sum(),
+			inputs=_zs_eik,
+			create_graph=True,
+		)[0]
+		grad_norm = grad_z.norm(dim=-1)
+		speed = speed_function(_zs_eik)
+		eikonal_dynamics_loss = ((grad_norm * speed - 1) ** 2).mean()
+		(self.cfg.eikonal_latent_consistency_coef * eikonal_dynamics_loss).backward()
+		return eikonal_dynamics_loss.detach()
 
 	def update(self, buffer):
 		"""
@@ -360,14 +400,31 @@ class TDMPC2(torch.nn.Module):
 
 		# Main update (compiled) — forward + main losses + backward
 		info, zs = self._update(obs, action, reward, terminated, **kwargs)
+		# Clone outputs to detach from CUDAGraph memory before running
+		# uncompiled eikonal functions that reuse the same model modules
+		info = info.clone()
+		zs = zs.clone()
 
-		# Eikonal regularizer (not compiled — requires double backward)
-		if self.cfg.eikonal_coef > 0:
+		# Eikonal regularizers (not compiled — require double backward)
+		if self.cfg.eikonal_latent_value_coef > 0:
 			_zs = zs[:-1]
 			eikonal_loss = self._eikonal_loss(_zs, action, task)
 			info["eikonal_loss"] = eikonal_loss
 		else:
 			info["eikonal_loss"] = 0.
+
+		if self.cfg.eikonal_state_latent_coef > 0:
+			eikonal_encoder_loss = self._eikonal_encoder_loss(obs, task)
+			info["eikonal_encoder_loss"] = eikonal_encoder_loss
+		else:
+			info["eikonal_encoder_loss"] = 0.
+
+		if self.cfg.eikonal_latent_consistency_coef > 0:
+			_zs = zs[:-1]
+			eikonal_dynamics_loss = self._eikonal_dynamics_loss(_zs, action, task)
+			info["eikonal_dynamics_loss"] = eikonal_dynamics_loss
+		else:
+			info["eikonal_dynamics_loss"] = 0.
 
 		# Optimizer step (uses accumulated gradients from main + eikonal backward)
 		grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.grad_clip_norm)

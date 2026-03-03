@@ -2,7 +2,7 @@ defaults:
     - override hydra/launcher: submitit_local
 
 # environment
-task: pointmaze-medium-navigate-singletask-v0
+task: ogb-pointmaze-medium-navigate-singletask-v0
 obs: state
 episodic: true
 
@@ -27,7 +27,7 @@ discount_denom: 5
 discount_min: 0.95
 discount_max: 0.995
 buffer_size: 1_000_000
-exp_name: default123
+exp_name: offline-training
 data_dir: ???
 
 # planning
@@ -62,9 +62,16 @@ task_dim: 96
 num_q: 5
 dropout: 0.01
 simnorm_dim: 8
+#simnorm_enabled: true
+
+eikonal_latent_value_coef: 0
+
+eikonal_state_latent_coef: 0.1
+
+eikonal_latent_consistency_coef: 0
 
 # logging
-wandb_project: tdmpc2-ogbench
+wandb_project: eikonal-testing
 wandb_entity: 
 wandb_silent: false
 enable_wandb: true
@@ -75,6 +82,13 @@ compile: true
 save_video: true
 save_agent: true
 seed: 1
+
+# offline OGBench training
+offline: true
+offline_steps: 100_000
+ogbench_dataset_dir: ~/.ogbench/data
+her_future_k: 4
+her_reward_threshold: 0.5
 
 # convenience
 work_dir: ???

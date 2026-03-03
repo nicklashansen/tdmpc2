@@ -1,0 +1,15 @@
+import ogbench
+# Test with a singletask to see dataset structure
+env, datasets = ogbench.make_env_and_datasets('pointmaze-medium-navigate-singletask-v0')
+print('Type:', type(datasets))
+if isinstance(datasets, (list, tuple)):
+    print('Number of datasets:', len(datasets))
+    for i, ds in enumerate(datasets):
+        print(f'Dataset {i} type:', type(ds))
+        if isinstance(ds, dict):
+            for k, v in ds.items():
+                print(f'  {k}: shape={v.shape if hasattr(v, "shape") else type(v)}')
+elif isinstance(datasets, dict):
+    for k, v in datasets.items():
+        print(f'  {k}: shape={v.shape if hasattr(v, "shape") else type(v)}')
+
