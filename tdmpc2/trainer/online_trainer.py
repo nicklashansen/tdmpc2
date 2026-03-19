@@ -25,11 +25,15 @@ class OnlineTrainer(Trainer):
 			steps_per_second=self._step / elapsed_time
 		)
 
+	_REWARD_COMPONENTS = ('r_dist', 'r_bearing', 'r_smooth', 'r_time', 'r_goal')
+
 	def eval(self):
 		"""Evaluate a TD-MPC2 agent."""
 		ep_rewards, ep_successes, ep_lengths = [], [], []
+		ep_components = {c: [] for c in self._REWARD_COMPONENTS}
 		for i in range(self.cfg.eval_episodes):
 			obs, done, ep_reward, t = self.env.reset(), False, 0, 0
+			ep_comp = {c: 0.0 for c in self._REWARD_COMPONENTS}
 			if self.cfg.save_video:
 				self.logger.video.init(self.env, enabled=(i==0))
 			while not done:
@@ -37,19 +41,26 @@ class OnlineTrainer(Trainer):
 				action = self.agent.act(obs, t0=t==0, eval_mode=True)
 				obs, reward, done, info = self.env.step(action)
 				ep_reward += reward
+				for c in self._REWARD_COMPONENTS:
+					ep_comp[c] += float(info.get(c, 0.0))
 				t += 1
 				if self.cfg.save_video:
 					self.logger.video.record(self.env)
 			ep_rewards.append(ep_reward)
 			ep_successes.append(info['success'])
 			ep_lengths.append(t)
+			for c in self._REWARD_COMPONENTS:
+				ep_components[c].append(ep_comp[c])
 			if self.cfg.save_video:
 				self.logger.video.save(self._step)
-		return dict(
+		result = dict(
 			episode_reward=np.nanmean(ep_rewards),
 			episode_success=np.nanmean(ep_successes),
-			episode_length= np.nanmean(ep_lengths),
+			episode_length=np.nanmean(ep_lengths),
 		)
+		for c in self._REWARD_COMPONENTS:
+			result[c] = np.nanmean(ep_components[c])
+		return result
 
 	def to_td(self, obs, action=None, reward=None, terminated=None):
 		"""Creates a TensorDict for a new episode."""
@@ -74,6 +85,7 @@ class OnlineTrainer(Trainer):
 	def train(self):
 		"""Train a TD-MPC2 agent."""
 		train_metrics, done, eval_next = {}, True, False
+		_ep_components = {c: 0.0 for c in self._REWARD_COMPONENTS}
 		while self._step <= self.cfg.steps:
 			# Evaluate agent periodically
 			if self._step % self.cfg.eval_freq == 0:
@@ -85,6 +97,7 @@ class OnlineTrainer(Trainer):
 					eval_metrics = self.eval()
 					eval_metrics.update(self.common_metrics())
 					self.logger.log(eval_metrics, 'eval')
+					self.logger.save_agent(self.agent, identifier=f'{self._step}')
 					eval_next = False
 
 				if self._step > 0:
@@ -96,12 +109,14 @@ class OnlineTrainer(Trainer):
 						episode_success=info['success'],
 						episode_length=len(self._tds),
 						episode_terminated=info['terminated'])
+					train_metrics.update(_ep_components)
 					train_metrics.update(self.common_metrics())
 					self.logger.log(train_metrics, 'train')
 					self._ep_idx = self.buffer.add(torch.cat(self._tds))
 
 				obs = self.env.reset()
 				self._tds = [self.to_td(obs)]
+				_ep_components = {c: 0.0 for c in self._REWARD_COMPONENTS}
 
 			# Collect experience
 			if self._step > self.cfg.seed_steps:
@@ -110,6 +125,8 @@ class OnlineTrainer(Trainer):
 				action = self.env.rand_act()
 			obs, reward, done, info = self.env.step(action)
 			self._tds.append(self.to_td(obs, action, reward, info['terminated']))
+			for c in self._REWARD_COMPONENTS:
+				_ep_components[c] += float(info.get(c, 0.0))
 
 			# Update agent
 			if self._step >= self.cfg.seed_steps:

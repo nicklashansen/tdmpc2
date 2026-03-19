@@ -114,6 +114,7 @@ class Logger:
 		self._group = cfg_to_group(cfg)
 		self._seed = cfg.seed
 		self._eval = []
+		self._train = []
 		print_run(cfg)
 		self.project = cfg.get("wandb_project", "none")
 		self.entity = cfg.get("wandb_entity", "none")
@@ -232,9 +233,18 @@ class Logger:
 			for k, v in d.items():
 				_d[category + "/" + k] = v
 			self._wandb.log(_d, step=d[xkey])
+		if category == "train" and self._save_csv:
+			keys = ["step", "episode_reward", "episode_success", "episode_length",
+					"r_dist", "r_bearing", "r_smooth", "r_time", "r_goal"]
+			self._train.append(np.array([d.get(k, float('nan')) for k in keys]))
+			if len(self._train) % 10 == 0:  # write every 10 episodes to reduce I/O
+				pd.DataFrame(np.array(self._train)).to_csv(
+					self._log_dir / "train.csv", header=keys, index=None
+				)
 		if category == "eval" and self._save_csv:
-			keys = ["step", "episode_reward"]
-			self._eval.append(np.array([d[keys[0]], d[keys[1]]]))
+			keys = ["step", "episode_reward", "episode_success", "episode_length",
+					"r_dist", "r_bearing", "r_smooth", "r_time", "r_goal"]
+			self._eval.append(np.array([d.get(k, float('nan')) for k in keys]))
 			pd.DataFrame(np.array(self._eval)).to_csv(
 				self._log_dir / "eval.csv", header=keys, index=None
 			)

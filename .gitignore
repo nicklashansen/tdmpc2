@@ -3,6 +3,16 @@ tdmpc2/logs/
 tdmpc2/outputs/
 tdmpc2/wandb/
 
+# Media / checkpoints
+*.mp4
+*.png
+*.pt
+*.pth
+
+# Temp
+temp_analysis/
+tdmpc2/dmcontrol/
+
 # HPC
 nautilus/*.yaml
 *.key

@@ -64,8 +64,8 @@ dropout: 0.01
 simnorm_dim: 8
 
 # logging
-wandb_project: ???
-wandb_entity: ???
+wandb_project: test-tb2
+wandb_entity: alex-ghitu-georgia-institute-of-technology
 wandb_silent: false
 enable_wandb: true
 save_csv: true

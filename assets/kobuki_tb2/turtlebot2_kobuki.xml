@@ -1,0 +1,83 @@
+<mujoco model="turtlebot2_kobuki">
+  <compiler angle="radian"/>
+
+  <asset>
+    <material name="grey" rgba="0.3 0.3 0.3 1"/>
+    <material name="body_blue" rgba="0.2 0.4 0.7 1"/>
+    <material name="arrow_yellow" rgba="0.95 0.85 0.2 1"/>
+  </asset>
+
+  <default>
+    <!-- Kobuki wheel motor -->
+    <default class="wheel">
+      <joint limited="false" frictionloss="0.1" armature="0.01"/>
+      <!-- max wheel angular vel: 0.7 m/s / 0.035 m = 20 rad/s -->
+      <velocity kv="0.1" ctrlrange="-20 20" ctrllimited="true"/>
+      <default class="wheel_left">
+        <joint axis="0 0 1"/>
+      </default>
+      <default class="wheel_right">
+        <joint axis="0 0 1"/>
+      </default>
+    </default>
+  </default>
+
+  <worldbody>
+    <body name="base_link" pos="0 0 0.0102">
+      <!-- URDF: mass=2.4, COM=(0.01, 0, 0), ixx=iyy=0.019995, izz=0.03675 -->
+      <inertial pos="0.01 0 0" mass="2.4" diaginertia="0.019995 0.019995 0.03675"/>
+      <joint type="free" name="base_joint"/>
+
+      <!-- Visual body cylinder (matches collision shape, visual only) -->
+      <geom name="body_cylinder" type="cylinder" size="0.178 0.05469"
+        pos="0 0 0.05949" material="body_blue"
+        contype="0" conaffinity="0" density="0" group="2"/>
+      <!-- Collision cylinder: URDF r=0.178, length=0.10938 (half=0.05469), origin z=0.05949 -->
+      <geom name="body_collision" type="cylinder" size="0.178 0.05469"
+        pos="0 0 0.05949" group="3"/>
+
+      <!-- Heading line on top of the cylinder for visual reference -->
+      <geom name="heading_line" type="box" size="0.09 0.008 0.003"
+        pos="0.06 0 0.118" material="arrow_yellow"
+        contype="0" conaffinity="0" density="0" group="2"/>
+
+      <!-- Front caster: URDF origin=(0.115, 0, 0.007), cylinder r=0.017 half-l=0.0088, rotated -pi/2 about X -->
+      <geom name="caster_front" type="cylinder" size="0.017 0.0088"
+        pos="0.115 0 0.007" quat="0.707107 -0.707107 0 0"
+        material="grey" friction="0.0001 0.0001 0.0001"
+        solref="0.02 1" solimp="0.95 0.99 0.001" condim="1"/>
+      <!-- Back caster: URDF origin=(-0.135, 0, 0.009), same geometry -->
+      <geom name="caster_back" type="cylinder" size="0.017 0.0088"
+        pos="-0.135 0 0.009" quat="0.707107 -0.707107 0 0"
+        material="grey" friction="0.0001 0.0001 0.0001"
+        solref="0.02 1" solimp="0.95 0.99 0.001" condim="1"/>
+
+      <!-- Left wheel: URDF origin=(0, 0.115, 0.025), rpy=(-pi/2, 0, 0), cylinder r=0.035 half-w=0.0103 -->
+      <body name="wheel_left_link" pos="0 0.115 0.025" quat="0.707107 -0.707107 0 0">
+        <inertial pos="0 0 0" mass="0.01" diaginertia="0.001 0.001 0.001"/>
+        <joint name="wheel_left_joint" class="wheel_left"/>
+        <geom type="cylinder" size="0.035 0.0103" material="grey"
+          contype="0" conaffinity="0" density="0" group="2"/>
+        <geom type="cylinder" size="0.035 0.0103" group="3" contype="1" conaffinity="1"/>
+      </body>
+      <!-- Right wheel: URDF origin=(0, -0.115, 0.025), same rotation -->
+      <body name="wheel_right_link" pos="0 -0.115 0.025" quat="0.707107 -0.707107 0 0">
+        <inertial pos="0 0 0" mass="0.01" diaginertia="0.001 0.001 0.001"/>
+        <joint name="wheel_right_joint" class="wheel_right"/>
+        <geom type="cylinder" size="0.035 0.0103" material="grey"
+          contype="0" conaffinity="0" density="0" group="2"/>
+        <geom type="cylinder" size="0.035 0.0103" group="3" contype="1" conaffinity="1"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <velocity class="wheel_left" name="left_wheel_velocity" joint="wheel_left_joint"/>
+    <velocity class="wheel_right" name="right_wheel_velocity" joint="wheel_right_joint"/>
+  </actuator>
+
+  <contact>
+    <exclude body1="base_link" body2="wheel_left_link"/>
+    <exclude body1="base_link" body2="wheel_right_link"/>
+  </contact>
+</mujoco>

@@ -1,0 +1,66 @@
+defaults:
+    - config          # inherit all TD-MPC2 base fields
+    - _self_          # this file's keys override the base
+
+# -----------------------------------------------------------------------
+# Fields from config.yaml that are irrelevant to PPO – give them safe
+# values so parse_cfg doesn't complain about missing required fields.
+# -----------------------------------------------------------------------
+checkpoint: null
+data_dir: null
+exp_name: ppo
+
+# -----------------------------------------------------------------------
+# PPO on-policy training
+# -----------------------------------------------------------------------
+
+# Number of environment steps collected before each gradient update.
+# Should be >> episode_length to span several episodes per rollout.
+n_steps: 16384
+
+# Discount factor (PPO uses a fixed scalar; TD-MPC2 uses an adaptive one).
+gamma: 0.99
+
+# GAE-λ: 1.0 = pure Monte Carlo returns, 0.0 = pure TD(0).
+gae_lambda: 0.95
+
+# PPO epochs – how many full passes over a rollout before discarding it.
+ppo_epochs: 10
+
+# Mini-batch size within each PPO epoch.
+ppo_batch_size: 64
+
+# PPO clipping range ε.
+clip_eps: 0.2
+
+# Coefficient for the value-function loss term.
+ppo_value_coef: 0.5
+
+# Coefficient for the entropy bonus (encourages exploration).
+ppo_entropy_coef: 0.01
+
+# -----------------------------------------------------------------------
+# Shared hypers (override base defaults as needed)
+# -----------------------------------------------------------------------
+
+# Learning rate – same default as TD-MPC2 for fair comparison.
+lr: 3e-4
+
+# Gradient clipping (tighter than TD-MPC2's 20, standard for PPO).
+grad_clip_norm: 0.5
+
+# Policy log-std bounds – identical to TD-MPC2.
+log_std_min: -10
+log_std_max: 2
+
+# Evaluate every this many environment steps.
+eval_freq: 50000
+
+# Number of episodes per evaluation.
+eval_episodes: 10
+
+# -----------------------------------------------------------------------
+# Architecture – default to the 5M model_size for comparison; override
+# on the command line with  model_size=1  etc.
+# -----------------------------------------------------------------------
+model_size: 5
