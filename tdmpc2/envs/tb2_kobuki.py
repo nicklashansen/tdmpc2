@@ -56,45 +56,47 @@ class TB2KobukiGoToEnv(gym.Env):
 	"""
 
 	metadata = {'render_modes': ['rgb_array']}
-	_GOAL_RADIUS_MIN = 0.3   # metres
-	_GOAL_RADIUS_MAX = 3.0   # metres
-	_SUCCESS_THRESH  = 0.15  # metres — goal reached if closer than this
-
-	# ---- Curriculum: progressively harder goals ----
-	_CURRICULUM_EPISODES = 500   # episodes to go from easy → full difficulty (~250k steps)
-	_ANGLE_START  = np.pi / 4   # ±45° in front at the beginning
-	_ANGLE_END    = np.pi       # full 360° at the end
-	_RADIUS_START = 0.3         # close goals at the beginning
-	_RADIUS_END   = 3.0         # full range at the end
-
-	# ---- Reward weights (λ) ----
-	_LAMBDA_DIST     = 35.0     # distance progress (scales naturally with distance)
-	_LAMBDA_BEARING  =  0.0007  # bearing alignment (scaled for 15k-step episodes)
-	_LAMBDA_SMOOTH   =  0.01    # angular smoothness (scaled for 15k-step episodes)
-	_LAMBDA_TIME     = -0.0013  # time step penalty  (~-20 total over 15k steps)
-	_LAMBDA_GOAL     = 100.0    # one-time success bonus (larger for harder 3m task)
-
-	# ---- Reward shaping constants (k) ----
-	_K1_BEARING = -10.0   # sharpness on bearing⁴ (tight peak near 0)
-	_K2_BEARING =  -0.1   # sharpness on bearing² (broad guidance)
-	_K3_SMOOTH  =  -0.33  # smoothness sensitivity
-
-	# ---- Action noise (sim-to-real: wheel slippage) ----
-	_SLIP_SIGMA = 0.1  # std of multiplicative per-wheel noise (0 = disabled)
-
-	# ---- Differential-drive kinematics (from URDF/XML) ----
-	_WHEEL_RADIUS = 0.035   # metres  (geom size="0.035 ...")
-	_WHEELBASE    = 0.230   # metres  (wheels at y = ±0.115)
-	_MAX_WHEEL_VEL = 20.0   # rad/s   (ctrlrange="-20 20")
-
-	# Derived twist limits (reachable when both wheels saturate together)
-	_V_LINEAR_MAX = _WHEEL_RADIUS * _MAX_WHEEL_VEL          # 0.7 m/s
-	_OMEGA_MAX    = 2.0 * _WHEEL_RADIUS * _MAX_WHEEL_VEL / _WHEELBASE  # ≈6.09 rad/s
 
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
 
+		# ---- Goal sampling ----
+		self._goal_radius_min = 0.3   # metres
+		self._success_thresh  = 0.15  # metres — goal reached if closer than this
+
+		# ---- Curriculum: progressively harder goals ----
+		self._curriculum_episodes = 500   # episodes to go from easy → full difficulty
+		self._angle_start  = np.pi / 4   # ±45° in front at the beginning
+		self._angle_end    = np.pi       # full 360° at the end
+		self._radius_start = 0.3         # close goals at the beginning
+		self._radius_end   = 3.0         # full range at the end
+
+		# ---- Reward weights (λ) ----
+		self._lambda_dist     = 35.0     # distance progress
+		self._lambda_bearing  =  0.0007  # bearing alignment (scaled for 15k-step episodes)
+		self._lambda_smooth   =  0.01    # angular smoothness (scaled for 15k-step episodes)
+		self._lambda_time     = -0.0013  # time step penalty (~-20 total over 15k steps)
+		self._lambda_goal     = 100.0    # one-time success bonus
+
+		# ---- Reward shaping constants (k) ----
+		self._k1_bearing = -10.0   # sharpness on bearing⁴ (tight peak near 0)
+		self._k2_bearing =  -0.1   # sharpness on bearing² (broad guidance)
+		self._k3_smooth  =  -0.33  # smoothness sensitivity
+
+		# ---- Action noise (sim-to-real: wheel slippage) ----
+		self._slip_sigma = 0.1  # std of multiplicative per-wheel noise (0 = disabled)
+
+		# ---- Differential-drive kinematics (from URDF/XML) ----
+		self._wheel_radius  = 0.035   # metres  (geom size="0.035 ...")
+		self._wheelbase     = 0.230   # metres  (wheels at y = ±0.115)
+		self._max_wheel_vel = 20.0    # rad/s   (ctrlrange="-20 20")
+
+		# Derived twist limits (reachable when both wheels saturate together)
+		self._v_linear_max = self._wheel_radius * self._max_wheel_vel          # 0.7 m/s
+		self._omega_max    = 2.0 * self._wheel_radius * self._max_wheel_vel / self._wheelbase  # ≈6.09 rad/s
+
+		# ---- MuJoCo model ----
 		self.model = mujoco.MjModel.from_xml_path(_SCENE_XML)
 		self.data  = mujoco.MjData(self.model)
 
@@ -170,7 +172,7 @@ class TB2KobukiGoToEnv(gym.Env):
 			dtype=np.float32
 		)
 
-	def _get_reward(self, action):
+	def _get_reward(self):
 		"""
 		Five-term compound reward.
 		All terms are designed so cumulative return stays negative until
@@ -183,24 +185,24 @@ class TB2KobukiGoToEnv(gym.Env):
 		_, yaw_rate = self._body_frame_velocities()
 
 		# 1. Distance progress: reward for getting closer
-		r_dist = self._LAMBDA_DIST * (self._prev_dist - dist)
+		r_dist = self._lambda_dist * (self._prev_dist - dist)
 
 		# 2. Bearing alignment: dual-exponential with sharp peak near 0
-		r_bearing = self._LAMBDA_BEARING * (
-			np.exp(self._K1_BEARING * bearing**4) +
-			np.exp(self._K2_BEARING * bearing**2)
+		r_bearing = self._lambda_bearing * (
+			np.exp(self._k1_bearing * bearing**4) +
+			np.exp(self._k2_bearing * bearing**2)
 		)
 
 		# 3. Smoothness: penalise abrupt yaw rate changes
 		delta_yaw_rate = abs(yaw_rate - self._prev_yaw_rate)
-		r_smooth = self._LAMBDA_SMOOTH * (np.exp(self._K3_SMOOTH * delta_yaw_rate) - 1.0)
+		r_smooth = self._lambda_smooth * (np.exp(self._k3_smooth * delta_yaw_rate) - 1.0)
 
 		# 4. Time penalty: constant cost per step → encourages speed
-		r_time = self._LAMBDA_TIME
+		r_time = self._lambda_time
 
 		# 5. Goal bonus
-		self._success = dist < self._SUCCESS_THRESH
-		r_goal = self._LAMBDA_GOAL if self._success else 0.0
+		self._success = dist < self._success_thresh
+		r_goal = self._lambda_goal if self._success else 0.0
 
 		# Update state for next step
 		self._prev_dist = dist
@@ -228,14 +230,14 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._success = False
 		self._episode_count += 1
 
-		progress = min(self._episode_count / self._CURRICULUM_EPISODES, 1.0)
+		progress = min(self._episode_count / self._curriculum_episodes, 1.0)
 
-		max_angle  = self._ANGLE_START + progress * (self._ANGLE_END - self._ANGLE_START)
-		max_radius = self._RADIUS_START + progress * (self._RADIUS_END - self._RADIUS_START)
+		max_angle  = self._angle_start + progress * (self._angle_end - self._angle_start)
+		max_radius = self._radius_start + progress * (self._radius_end - self._radius_start)
 
 		# Goal angle centred on robot's forward direction (yaw=0 at reset)
 		angle  = np.random.uniform(-max_angle, max_angle)
-		radius = np.random.uniform(self._GOAL_RADIUS_MIN, max_radius)
+		radius = np.random.uniform(self._goal_radius_min, max_radius)
 		self._target = np.array(
 			[radius * np.cos(angle), radius * np.sin(angle)], dtype=np.float32
 		)
@@ -251,25 +253,25 @@ class TB2KobukiGoToEnv(gym.Env):
 
 	def _twist_to_wheels(self, v_linear, omega):
 		"""Inverse diff-drive kinematics: twist → wheel angular velocities."""
-		v_l = (v_linear - omega * self._WHEELBASE / 2.0) / self._WHEEL_RADIUS
-		v_r = (v_linear + omega * self._WHEELBASE / 2.0) / self._WHEEL_RADIUS
+		v_l = (v_linear - omega * self._wheelbase / 2.0) / self._wheel_radius
+		v_r = (v_linear + omega * self._wheelbase / 2.0) / self._wheel_radius
 		return v_l, v_r
 
 	def step(self, action):
 		action = np.asarray(action, dtype=np.float64)
 		# Policy outputs normalised twist; scale to physical units
-		v_linear = action[0] * self._V_LINEAR_MAX
-		omega    = action[1] * self._OMEGA_MAX
+		v_linear = action[0] * self._v_linear_max
+		omega    = action[1] * self._omega_max
 		# Convert to per-wheel angular velocities for MuJoCo actuators
 		v_l, v_r = self._twist_to_wheels(v_linear, omega)
 		# Multiplicative wheel noise: simulates slippage / uneven traction
-		if self._SLIP_SIGMA > 0:
-			v_l *= 1.0 + np.random.normal(0.0, self._SLIP_SIGMA)
-			v_r *= 1.0 + np.random.normal(0.0, self._SLIP_SIGMA)
-		self.data.ctrl[0] = np.clip(v_l, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
-		self.data.ctrl[1] = np.clip(v_r, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
+		if self._slip_sigma > 0:
+			v_l *= 1.0 + np.random.normal(0.0, self._slip_sigma)
+			v_r *= 1.0 + np.random.normal(0.0, self._slip_sigma)
+		self.data.ctrl[0] = np.clip(v_l, -self._max_wheel_vel, self._max_wheel_vel)
+		self.data.ctrl[1] = np.clip(v_r, -self._max_wheel_vel, self._max_wheel_vel)
 		mujoco.mj_step(self.model, self.data)
-		reward = self._get_reward(action)
+		reward = self._get_reward()
 		done = self._success
 		info = defaultdict(float)
 		info['success'] = float(self._success)
