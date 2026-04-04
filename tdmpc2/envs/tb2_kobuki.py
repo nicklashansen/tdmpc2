@@ -56,9 +56,8 @@ class TB2KobukiGoToEnv(gym.Env):
 	"""
 
 	metadata = {'render_modes': ['rgb_array']}
-	_FRAME_SKIP = 5   # 0.002 s × 5 = 0.01 s per policy step
 	_GOAL_RADIUS_MIN = 0.3   # metres
-	_GOAL_RADIUS_MAX = 0.8   # metres — reachable within episode
+	_GOAL_RADIUS_MAX = 3.0   # metres
 	_SUCCESS_THRESH  = 0.15  # metres — goal reached if closer than this
 
 	# ---- Curriculum: progressively harder goals ----
@@ -66,14 +65,14 @@ class TB2KobukiGoToEnv(gym.Env):
 	_ANGLE_START  = np.pi / 4   # ±45° in front at the beginning
 	_ANGLE_END    = np.pi       # full 360° at the end
 	_RADIUS_START = 0.3         # close goals at the beginning
-	_RADIUS_END   = 0.8         # full range at the end
+	_RADIUS_END   = 3.0         # full range at the end
 
 	# ---- Reward weights (λ) ----
-	_LAMBDA_DIST     = 35.0   # distance progress (slight bump for stronger gradient)
-	_LAMBDA_BEARING  =  0.02  # bearing alignment (gentle guide, not dominant)
-	_LAMBDA_SMOOTH   =  0.3   # angular smoothness (keep subordinate)
-	_LAMBDA_TIME     = -0.04  # time step penalty  (-20 total over 500 steps)
-	_LAMBDA_GOAL     = 40.0   # one-time success bonus (slightly reduced)
+	_LAMBDA_DIST     = 35.0     # distance progress (scales naturally with distance)
+	_LAMBDA_BEARING  =  0.0007  # bearing alignment (scaled for 15k-step episodes)
+	_LAMBDA_SMOOTH   =  0.01    # angular smoothness (scaled for 15k-step episodes)
+	_LAMBDA_TIME     = -0.0013  # time step penalty  (~-20 total over 15k steps)
+	_LAMBDA_GOAL     = 100.0    # one-time success bonus (larger for harder 3m task)
 
 	# ---- Reward shaping constants (k) ----
 	_K1_BEARING = -10.0   # sharpness on bearing⁴ (tight peak near 0)
@@ -262,8 +261,7 @@ class TB2KobukiGoToEnv(gym.Env):
 		v_l, v_r = self._twist_to_wheels(v_linear, omega)
 		self.data.ctrl[0] = np.clip(v_l, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
 		self.data.ctrl[1] = np.clip(v_r, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
-		for _ in range(self._FRAME_SKIP):
-			mujoco.mj_step(self.model, self.data)
+		mujoco.mj_step(self.model, self.data)
 		reward = self._get_reward(action)
 		done = self._success
 		info = defaultdict(float)
@@ -286,5 +284,5 @@ def make_env(cfg):
 		raise ValueError(f'Unknown TB2 Kobuki task: {cfg.task}')
 	assert cfg.obs == 'state', 'TB2 Kobuki environment only supports state observations.'
 	env = TB2KobukiGoToEnv(cfg)
-	env = Timeout(env, max_episode_steps=500)
+	env = Timeout(env, max_episode_steps=15000)
 	return env
