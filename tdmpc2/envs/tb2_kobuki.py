@@ -85,7 +85,7 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._k3_smooth  =  -0.33  # smoothness sensitivity
 
 		# ---- Action noise (sim-to-real: wheel slippage) ----
-		self._slip_sigma = 0.1  # std of multiplicative per-wheel noise (0 = disabled)
+		self._slip_sigma = 0.01  # std of multiplicative per-wheel noise (0 = disabled)
 
 		# ---- Differential-drive kinematics (from URDF/XML) ----
 		self._wheel_radius  = 0.035   # metres  (geom size="0.035 ...")
