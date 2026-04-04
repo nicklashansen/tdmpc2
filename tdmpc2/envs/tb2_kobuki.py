@@ -74,10 +74,10 @@ class TB2KobukiGoToEnv(gym.Env):
 
 		# ---- Reward weights (λ) ----
 		self._lambda_dist     = 35.0     # distance progress
-		self._lambda_bearing  =  0.0007  # bearing alignment (scaled for 15k-step episodes)
-		self._lambda_smooth   =  0.01    # angular smoothness (scaled for 15k-step episodes)
-		self._lambda_time     = -0.0013  # time step penalty (~-20 total over 15k steps)
-		self._lambda_goal     = 100.0    # one-time success bonus
+		self._lambda_bearing  =  0.005   # bearing alignment
+		self._lambda_smooth   =  0.08    # angular smoothness
+		self._lambda_time     = -0.015   # time step penalty
+		self._lambda_goal     = 40.0     # one-time success bonus
 
 		# ---- Reward shaping constants (k) ----
 		self._k1_bearing = -10.0   # sharpness on bearing⁴ (tight peak near 0)
