@@ -110,8 +110,6 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._prev_dist     = 0.0
 		self._prev_yaw_rate = 0.0
 		self._episode_count = 0
-		self._use_ppo_curriculum = False  # only True when set_curriculum() is called (PPO)
-		self._ppo_difficulty     = 0.0    # grows 0 → 1 over training
 
 		self.observation_space = gym.spaces.Box(
 			low=-np.inf, high=np.inf, shape=(5,), dtype=np.float32
@@ -119,20 +117,6 @@ class TB2KobukiGoToEnv(gym.Env):
 		self.action_space = gym.spaces.Box(
 			low=np.float32(-1.0), high=np.float32(1.0), shape=(2,), dtype=np.float32
 		)
-
-	# ------------------------------------------------------------------
-	# Curriculum  (PPO only — TD-MPC2 never calls this)
-	# ------------------------------------------------------------------
-
-	def set_curriculum(self, difficulty):
-		"""
-		PPO-controlled curriculum based on training steps, not episode count.
-		  difficulty=0.0 → goals at ±45°, radius 0.3m  (easy)
-		  difficulty=1.0 → goals at ±180°, radius 0.8m  (full task)
-		TD-MPC2 never calls this so its episode-count curriculum is unchanged.
-		"""
-		self._use_ppo_curriculum = True
-		self._ppo_difficulty     = float(np.clip(difficulty, 0.0, 1.0))
 
 	# ------------------------------------------------------------------
 	# Helpers
@@ -242,12 +226,7 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._success = False
 		self._episode_count += 1
 
-		if self._use_ppo_curriculum:
-			# PPO path: difficulty set externally by PPOTrainer based on steps
-			progress = self._ppo_difficulty
-		else:
-			# TD-MPC2 path: original episode-count curriculum, completely unchanged
-			progress = min(self._episode_count / self._CURRICULUM_EPISODES, 1.0)
+		progress = min(self._episode_count / self._CURRICULUM_EPISODES, 1.0)
 
 		max_angle  = self._ANGLE_START + progress * (self._ANGLE_END - self._ANGLE_START)
 		max_radius = self._RADIUS_START + progress * (self._RADIUS_END - self._RADIUS_START)
