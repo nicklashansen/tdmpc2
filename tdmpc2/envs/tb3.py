@@ -62,6 +62,8 @@ class TB3GoToEnv(gym.Env):
 		self._target = np.zeros(2, dtype=np.float32)
 		self._success = False
 		self._goal_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, 'goal')
+		self._use_curriculum   = False   # only True when set_curriculum() is called (PPO)
+		self._max_heading_error = 0.0    # radians; grows 0 → π over curriculum
 		self._renderer = mujoco.Renderer(self.model, height=240, width=320)
 
 		self.observation_space = gym.spaces.Box(
@@ -71,6 +73,20 @@ class TB3GoToEnv(gym.Env):
 		self.action_space = gym.spaces.Box(
 			low=np.float32(-1.0), high=np.float32(1.0), shape=(2,), dtype=np.float32
 		)
+
+	# ------------------------------------------------------------------
+	# Curriculum  (PPO only — TD-MPC2 never calls this)
+	# ------------------------------------------------------------------
+
+	def set_curriculum(self, difficulty):
+		"""
+		Gradually increase initial heading error as training progresses.
+		  difficulty=0.0 → robot spawns facing goal exactly (easy start)
+		  difficulty=1.0 → robot spawns with fully random heading (full task)
+		TD-MPC2 never calls this so its reset behaviour is unchanged.
+		"""
+		self._use_curriculum    = True
+		self._max_heading_error = float(np.clip(difficulty, 0.0, 1.0)) * np.pi
 
 	# ------------------------------------------------------------------
 	# Helpers
@@ -135,6 +151,20 @@ class TB3GoToEnv(gym.Env):
 		)
 		# Move the goal sphere to the new target position
 		self.model.geom_pos[self._goal_geom_id, :2] = self._target
+
+		# Curriculum: control initial heading error relative to goal direction.
+		# Only active when set_curriculum() has been called (PPO path).
+		# TD-MPC2 takes the else branch → identical behaviour to before.
+		if self._use_curriculum:
+			goal_angle    = float(np.arctan2(self._target[1], self._target[0]))
+			heading_error = np.random.uniform(-self._max_heading_error, self._max_heading_error)
+			initial_yaw   = goal_angle + heading_error
+			self.data.qpos[3] = float(np.cos(initial_yaw / 2))  # qw
+			self.data.qpos[4] = 0.0                               # qx
+			self.data.qpos[5] = 0.0                               # qy
+			self.data.qpos[6] = float(np.sin(initial_yaw / 2))  # qz
+			mujoco.mj_forward(self.model, self.data)
+
 		return self._get_obs()
 
 	def step(self, action):

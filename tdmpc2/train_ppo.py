@@ -43,6 +43,9 @@ def train(cfg: dict):
 	assert cfg.steps > 0, 'Must train for at least 1 step.'
 
 	cfg = parse_cfg(cfg)
+	# Save PPO models to home directory to avoid log dir permission issues.
+	from pathlib import Path
+	cfg.work_dir = Path('/home/GTL/asave/ppo_logs') / cfg.task / str(cfg.seed) / cfg.exp_name
 	set_seed(cfg.seed)
 
 	print(colored('Work dir:', 'yellow', attrs=['bold']), cfg.work_dir)

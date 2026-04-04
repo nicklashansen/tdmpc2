@@ -29,16 +29,23 @@ class TB2KobukiGoToEnv(gym.Env):
 	TurtleBot2 Kobuki differential-drive 'Go To' task.
 
 	Ground-truth x/y/yaw provided by the simulator (no LiDAR/SLAM).
-	Agent controls left and right wheel velocities directly.
+	Agent outputs twist commands (v_linear, omega), matching the ROS2
+	cmd_vel interface used on the real robot.  The environment converts
+	to per-wheel angular velocities internally for MuJoCo.
 
-	Observation (6-dim, BODY FRAME):
-	  [surge_vel, sway_vel, yaw_rate, cos(bearing), sin(bearing), dist]
-	  - surge/sway/yaw_rate: robot velocities in body frame
+	Observation (5-dim, BODY FRAME):
+	  [surge, yaw_rate, cos(bearing), sin(bearing), distance]
+	  - surge: forward velocity in body frame
+	  - yaw_rate: angular velocity about z
 	  - bearing: angle of goal in body frame (0 = straight ahead)
-	  - dist: Euclidean distance to goal
+	  - distance: Euclidean distance to goal
+	  Sway is dropped (always ~0 for differential drive on flat ground).
 
 	Action (2-dim):
-	  [vel_left, vel_right]  in [-1, 1] (normalised; scaled to ±20 rad/s internally)
+	  [v_linear, omega]  in [-1, 1] (normalised; scaled to physical twist internally)
+	  Converted to wheel velocities via inverse diff-drive kinematics:
+	    v_l = (v_linear - omega * w_b / 2) / r_w
+	    v_r = (v_linear + omega * w_b / 2) / r_w
 
 	Reward (five-term compound):
 	  r = λ1·(d_{t-1} - d_t)                         # distance progress
@@ -73,6 +80,15 @@ class TB2KobukiGoToEnv(gym.Env):
 	_K2_BEARING =  -0.1   # sharpness on bearing² (broad guidance)
 	_K3_SMOOTH  =  -0.33  # smoothness sensitivity
 
+	# ---- Differential-drive kinematics (from URDF/XML) ----
+	_WHEEL_RADIUS = 0.035   # metres  (geom size="0.035 ...")
+	_WHEELBASE    = 0.230   # metres  (wheels at y = ±0.115)
+	_MAX_WHEEL_VEL = 20.0   # rad/s   (ctrlrange="-20 20")
+
+	# Derived twist limits (reachable when both wheels saturate together)
+	_V_LINEAR_MAX = _WHEEL_RADIUS * _MAX_WHEEL_VEL          # 0.7 m/s
+	_OMEGA_MAX    = 2.0 * _WHEEL_RADIUS * _MAX_WHEEL_VEL / _WHEELBASE  # ≈6.09 rad/s
+
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
@@ -94,14 +110,29 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._prev_dist     = 0.0
 		self._prev_yaw_rate = 0.0
 		self._episode_count = 0
+		self._use_ppo_curriculum = False  # only True when set_curriculum() is called (PPO)
+		self._ppo_difficulty     = 0.0    # grows 0 → 1 over training
 
 		self.observation_space = gym.spaces.Box(
-			low=-np.inf, high=np.inf, shape=(6,), dtype=np.float32
+			low=-np.inf, high=np.inf, shape=(5,), dtype=np.float32
 		)
-		self._action_scale = np.float32(20.0)
 		self.action_space = gym.spaces.Box(
 			low=np.float32(-1.0), high=np.float32(1.0), shape=(2,), dtype=np.float32
 		)
+
+	# ------------------------------------------------------------------
+	# Curriculum  (PPO only — TD-MPC2 never calls this)
+	# ------------------------------------------------------------------
+
+	def set_curriculum(self, difficulty):
+		"""
+		PPO-controlled curriculum based on training steps, not episode count.
+		  difficulty=0.0 → goals at ±45°, radius 0.3m  (easy)
+		  difficulty=1.0 → goals at ±180°, radius 0.8m  (full task)
+		TD-MPC2 never calls this so its episode-count curriculum is unchanged.
+		"""
+		self._use_ppo_curriculum = True
+		self._ppo_difficulty     = float(np.clip(difficulty, 0.0, 1.0))
 
 	# ------------------------------------------------------------------
 	# Helpers
@@ -130,29 +161,24 @@ class TB2KobukiGoToEnv(gym.Env):
 		return dx_b, dy_b
 
 	def _body_frame_velocities(self):
-		"""
-		Return (surge, sway, yaw_rate) — linear velocities in body frame
-		and angular velocity about z.
-		"""
+		"""Return (surge, yaw_rate) — forward velocity in body frame and angular velocity about z."""
 		vx_w, vy_w = float(self.data.qvel[0]), float(self.data.qvel[1])
 		yaw = self._yaw()
-		cos_y, sin_y = np.cos(yaw), np.sin(yaw)
-		surge =  cos_y * vx_w + sin_y * vy_w
-		sway  = -sin_y * vx_w + cos_y * vy_w
-		yaw_rate = float(self.data.qvel[5])  # angular velocity about z
-		return surge, sway, yaw_rate
+		surge = np.cos(yaw) * vx_w + np.sin(yaw) * vy_w
+		yaw_rate = float(self.data.qvel[5])
+		return surge, yaw_rate
 
 	def _get_obs(self):
 		"""
-		Body-frame observation (6-dim):
-		  [surge_vel, sway_vel, yaw_rate, cos(bearing), sin(bearing), dist]
+		Body-frame observation (5-dim):
+		  [surge, yaw_rate, cos(bearing), sin(bearing), distance]
 		"""
-		surge, sway, yaw_rate = self._body_frame_velocities()
+		surge, yaw_rate = self._body_frame_velocities()
 		dx_b, dy_b = self._body_frame_goal()
 		dist = float(np.hypot(dx_b, dy_b))
 		bearing = float(np.arctan2(dy_b, dx_b))
 		return np.array(
-			[surge, sway, yaw_rate,
+			[surge, yaw_rate,
 			 np.cos(bearing), np.sin(bearing),
 			 dist],
 			dtype=np.float32
@@ -168,7 +194,7 @@ class TB2KobukiGoToEnv(gym.Env):
 		dx_b, dy_b = self._body_frame_goal()
 		dist = float(np.hypot(dx_b, dy_b))
 		bearing = float(np.arctan2(dy_b, dx_b))
-		_, _, yaw_rate = self._body_frame_velocities()
+		_, yaw_rate = self._body_frame_velocities()
 
 		# 1. Distance progress: reward for getting closer
 		r_dist = self._LAMBDA_DIST * (self._prev_dist - dist)
@@ -216,8 +242,13 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._success = False
 		self._episode_count += 1
 
-		# Curriculum: linearly interpolate from easy → hard over N episodes
-		progress = min(self._episode_count / self._CURRICULUM_EPISODES, 1.0)
+		if self._use_ppo_curriculum:
+			# PPO path: difficulty set externally by PPOTrainer based on steps
+			progress = self._ppo_difficulty
+		else:
+			# TD-MPC2 path: original episode-count curriculum, completely unchanged
+			progress = min(self._episode_count / self._CURRICULUM_EPISODES, 1.0)
+
 		max_angle  = self._ANGLE_START + progress * (self._ANGLE_END - self._ANGLE_START)
 		max_radius = self._RADIUS_START + progress * (self._RADIUS_END - self._RADIUS_START)
 
@@ -237,10 +268,21 @@ class TB2KobukiGoToEnv(gym.Env):
 
 		return self._get_obs()
 
+	def _twist_to_wheels(self, v_linear, omega):
+		"""Inverse diff-drive kinematics: twist → wheel angular velocities."""
+		v_l = (v_linear - omega * self._WHEELBASE / 2.0) / self._WHEEL_RADIUS
+		v_r = (v_linear + omega * self._WHEELBASE / 2.0) / self._WHEEL_RADIUS
+		return v_l, v_r
+
 	def step(self, action):
 		action = np.asarray(action, dtype=np.float64)
-		scaled = action * self._action_scale
-		self.data.ctrl[:] = np.clip(scaled, -self._action_scale, self._action_scale)
+		# Policy outputs normalised twist; scale to physical units
+		v_linear = action[0] * self._V_LINEAR_MAX
+		omega    = action[1] * self._OMEGA_MAX
+		# Convert to per-wheel angular velocities for MuJoCo actuators
+		v_l, v_r = self._twist_to_wheels(v_linear, omega)
+		self.data.ctrl[0] = np.clip(v_l, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
+		self.data.ctrl[1] = np.clip(v_r, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
 		for _ in range(self._FRAME_SKIP):
 			mujoco.mj_step(self.model, self.data)
 		reward = self._get_reward(action)

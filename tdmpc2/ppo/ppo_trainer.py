@@ -123,10 +123,11 @@ class PPOTrainer:
 
 		self.device = next(agent.parameters()).device
 
-		# Single Adam optimiser over all PPO parameters
-		self.optimizer = torch.optim.Adam(
-			agent.parameters(), lr=cfg.lr, eps=1e-5
-		)
+		# Separate optimisers: value tracks changing returns faster than policy
+		pi_params  = list(agent._encoder.parameters()) + list(agent._pi.parameters())
+		val_params = list(agent._value.parameters())
+		self.optimizer     = torch.optim.Adam(pi_params,  lr=cfg.lr,        eps=1e-5)
+		self.val_optimizer = torch.optim.Adam(val_params, lr=cfg.lr * 10.0, eps=1e-5)
 
 		obs_dim    = cfg.obs_shape[cfg.get('obs', 'state')][0]
 		action_dim = cfg.action_dim
@@ -189,10 +190,14 @@ class PPOTrainer:
 	# PPO gradient update
 	# ------------------------------------------------------------------
 
-	def _update(self, advantages, returns):
+	def _update(self, advantages, returns, value_only=False):
 		"""
 		Run ppo_epochs full passes over the rollout buffer, each time
 		splitting into mini-batches.
+
+		value_only=True: only update the critic (freeze policy).  Used for
+		1-2 rollouts after a curriculum difficulty increase so the value
+		function can recalibrate before policy gradients are applied.
 
 		Returns a dict of mean training metrics across all mini-batches.
 		"""
@@ -203,44 +208,75 @@ class PPOTrainer:
 
 		metrics = dict(policy_loss=[], value_loss=[], entropy=[], approx_kl=[])
 
+		target_kl  = getattr(cfg, 'target_kl', None)
+		early_stop = False
+
+		# Value-only warm-up: recalibrate V(s) before touching the policy.
+		warmup_epochs = 0 if value_only else getattr(cfg, 'value_warmup_epochs', 0)
+		for _ in range(warmup_epochs):
+			for obs_mb, act_mb, old_lp_mb, adv_mb, ret_mb in \
+					self.buffer.get_minibatches(advantages, returns, cfg.ppo_batch_size):
+				_, _, new_values = self.agent.evaluate_actions(obs_mb, act_mb)
+				v_loss = F.mse_loss(new_values, ret_mb)
+				self.val_optimizer.zero_grad()
+				(cfg.ppo_value_coef * v_loss).backward()
+				nn.utils.clip_grad_norm_(self.agent._value.parameters(), cfg.grad_clip_norm)
+				self.val_optimizer.step()
+				metrics['value_loss'].append(v_loss.item())
+
 		for _ in range(cfg.ppo_epochs):
+			if early_stop:
+				break
 			for obs_mb, act_mb, old_lp_mb, adv_mb, ret_mb in \
 					self.buffer.get_minibatches(advantages, returns, cfg.ppo_batch_size):
 
 				new_log_probs, entropy, new_values = \
 					self.agent.evaluate_actions(obs_mb, act_mb)
 
-				# Clipped surrogate objective
-				log_ratio  = new_log_probs - old_lp_mb
-				ratio      = log_ratio.exp()
-				surr1 = ratio * adv_mb
-				surr2 = ratio.clamp(1 - cfg.clip_eps, 1 + cfg.clip_eps) * adv_mb
-				policy_loss = -torch.min(surr1, surr2).mean()
-
 				# Value loss (unclipped — simple MSE)
 				value_loss = F.mse_loss(new_values, ret_mb)
 
-				# Entropy bonus (maximise entropy → explore)
-				entropy_loss = -entropy.mean()
+				# Value update with fast optimizer (always)
+				self.val_optimizer.zero_grad()
+				(cfg.ppo_value_coef * value_loss).backward(retain_graph=not value_only)
+				nn.utils.clip_grad_norm_(self.agent._value.parameters(), cfg.grad_clip_norm)
+				self.val_optimizer.step()
 
-				loss = (
-					policy_loss
-					+ cfg.ppo_value_coef * value_loss
-					+ cfg.ppo_entropy_coef * entropy_loss
-				)
+				if not value_only:
+					# Clipped surrogate objective
+					log_ratio  = new_log_probs - old_lp_mb
+					ratio      = log_ratio.exp()
+					surr1 = ratio * adv_mb
+					surr2 = ratio.clamp(1 - cfg.clip_eps, 1 + cfg.clip_eps) * adv_mb
+					policy_loss = -torch.min(surr1, surr2).mean()
+					entropy_loss = -entropy.mean()
+					pi_loss = policy_loss + cfg.ppo_entropy_coef * entropy_loss
 
-				self.optimizer.zero_grad()
-				loss.backward()
-				nn.utils.clip_grad_norm_(self.agent.parameters(), cfg.grad_clip_norm)
-				self.optimizer.step()
+					self.optimizer.zero_grad()
+					pi_loss.backward()
+					nn.utils.clip_grad_norm_(
+						list(self.agent._encoder.parameters()) + list(self.agent._pi.parameters()),
+						cfg.grad_clip_norm,
+					)
+					self.optimizer.step()
 
-				with torch.no_grad():
-					approx_kl = ((ratio - 1) - log_ratio).mean()
+				if value_only:
+					metrics['policy_loss'].append(0.0)
+					metrics['entropy'].append(entropy.mean().item())
+					metrics['approx_kl'].append(0.0)
+				else:
+					with torch.no_grad():
+						approx_kl = ((ratio - 1) - log_ratio).mean()
+					metrics['policy_loss'].append(policy_loss.item())
+					metrics['entropy'].append(entropy.mean().item())
+					metrics['approx_kl'].append(approx_kl.item())
 
-				metrics['policy_loss'].append(policy_loss.item())
+					# Early stopping: halt if policy has changed too much
+					if target_kl is not None and approx_kl.item() > target_kl:
+						early_stop = True
+						break
+
 				metrics['value_loss'].append(value_loss.item())
-				metrics['entropy'].append(entropy.mean().item())
-				metrics['approx_kl'].append(approx_kl.item())
 
 		return {k: float(np.mean(v)) for k, v in metrics.items()}
 
@@ -257,7 +293,50 @@ class PPOTrainer:
 		next_eval_step = 0
 		train_metrics = {}
 
+		# Success-based curriculum state
+		_use_success_curriculum = (
+			getattr(cfg, 'curriculum_success_threshold', 0) > 0
+			and hasattr(self.env.unwrapped, 'set_curriculum')
+		)
+		_curriculum_difficulty  = float(getattr(cfg, 'curriculum_start', 0.0))
+		_curriculum_step        = getattr(cfg, 'curriculum_difficulty_step', 0.05)
+		_success_threshold      = getattr(cfg, 'curriculum_success_threshold', 0.7)
+		_fail_threshold         = getattr(cfg, 'curriculum_fail_threshold', 0.3)
+		_window                 = getattr(cfg, 'curriculum_window', 10)
+		_recent_successes       = []   # rolling window of per-rollout success rates
+		_value_warmup_remaining = 0    # rollouts of value-only updates after difficulty change
+		_advance_warmup         = int(getattr(cfg, 'curriculum_advance_warmup', 2))
+
 		while self._step <= cfg.steps:
+
+			# ---- Curriculum update ------------------------------------------
+			if _use_success_curriculum:
+				# Success-based: advance only when policy is consistently good
+				if len(_recent_successes) >= _window:
+					avg = float(np.mean(_recent_successes[-_window:]))
+					if avg >= _success_threshold:
+						new_difficulty = min(1.0, _curriculum_difficulty + _curriculum_step)
+						if new_difficulty != _curriculum_difficulty:
+							_curriculum_difficulty = new_difficulty
+							_recent_successes.clear()   # reset window; earn next step from scratch
+							_value_warmup_remaining = _advance_warmup  # recalibrate critic before touching policy
+					elif avg < _fail_threshold and _curriculum_difficulty > 0:
+						new_difficulty = max(0.0, _curriculum_difficulty - _curriculum_step * 0.5)
+						if new_difficulty != _curriculum_difficulty:
+							_curriculum_difficulty = new_difficulty
+							_recent_successes.clear()   # reset window after stepping back
+							_value_warmup_remaining = _advance_warmup  # recalibrate critic before touching policy
+				self.env.unwrapped.set_curriculum(_curriculum_difficulty)
+			elif getattr(cfg, 'curriculum_steps', 0) > 0 and hasattr(self.env.unwrapped, 'set_curriculum'):
+				# Step-based: difficulty increases linearly over curriculum_steps steps,
+				# starting from curriculum_start.
+				start = float(getattr(cfg, 'curriculum_start', 0.0))
+				progress = min(1.0, self._step / cfg.curriculum_steps)
+				_curriculum_difficulty = start + progress * (1.0 - start)
+				self.env.unwrapped.set_curriculum(_curriculum_difficulty)
+			elif hasattr(self.env.unwrapped, 'set_curriculum'):
+				# No curriculum advancement — hold at curriculum_start for the whole run.
+				self.env.unwrapped.set_curriculum(_curriculum_difficulty)
 
 			# ---- Collect one full rollout ---------------------------
 			self.buffer.reset()
@@ -317,16 +396,26 @@ class PPOTrainer:
 			)
 
 			# ---- PPO gradient update --------------------------------
+			rollout_success = float(np.mean(rollout_ep_successes)) if rollout_ep_successes else 0.0
 			self.agent.train()
-			update_metrics = self._update(advantages, returns)
+			# When policy is near-perfect, skip policy gradient -- advantages
+			# have near-zero variance and the normalised gradient is pure noise.
+			_guard = getattr(cfg, 'noise_guard_threshold', 0.0)
+			value_only = (_value_warmup_remaining > 0) or (_guard > 0 and rollout_success >= _guard)
+			update_metrics = self._update(advantages, returns, value_only=value_only)
+			if _value_warmup_remaining > 0:
+				_value_warmup_remaining -= 1
 			self.agent.eval()
 
 			# ---- Log training metrics (once per rollout) ------------
 			if rollout_ep_rewards:
+				if _use_success_curriculum:
+					_recent_successes.append(rollout_success)
 				train_metrics = dict(
 					episode_reward=np.mean(rollout_ep_rewards),
-					episode_success=np.mean(rollout_ep_successes),
+					episode_success=rollout_success,
 					episode_length=np.mean(rollout_ep_lengths),
+					curriculum_difficulty=_curriculum_difficulty,
 				)
 				train_metrics.update(update_metrics)
 				train_metrics.update(self.common_metrics())
