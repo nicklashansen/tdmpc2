@@ -79,6 +79,9 @@ class TB2KobukiGoToEnv(gym.Env):
 	_K2_BEARING =  -0.1   # sharpness on bearing² (broad guidance)
 	_K3_SMOOTH  =  -0.33  # smoothness sensitivity
 
+	# ---- Action noise (sim-to-real: wheel slippage) ----
+	_SLIP_SIGMA = 0.1  # std of multiplicative per-wheel noise (0 = disabled)
+
 	# ---- Differential-drive kinematics (from URDF/XML) ----
 	_WHEEL_RADIUS = 0.035   # metres  (geom size="0.035 ...")
 	_WHEELBASE    = 0.230   # metres  (wheels at y = ±0.115)
@@ -259,6 +262,10 @@ class TB2KobukiGoToEnv(gym.Env):
 		omega    = action[1] * self._OMEGA_MAX
 		# Convert to per-wheel angular velocities for MuJoCo actuators
 		v_l, v_r = self._twist_to_wheels(v_linear, omega)
+		# Multiplicative wheel noise: simulates slippage / uneven traction
+		if self._SLIP_SIGMA > 0:
+			v_l *= 1.0 + np.random.normal(0.0, self._SLIP_SIGMA)
+			v_r *= 1.0 + np.random.normal(0.0, self._SLIP_SIGMA)
 		self.data.ctrl[0] = np.clip(v_l, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
 		self.data.ctrl[1] = np.clip(v_r, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
 		mujoco.mj_step(self.model, self.data)
