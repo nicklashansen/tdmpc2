@@ -74,18 +74,23 @@ class TB2KobukiGoToEnv(gym.Env):
 
 		# ---- Reward weights (λ) ----
 		self._lambda_dist     = 35.0     # distance progress
-		self._lambda_bearing  =  0.005   # bearing alignment
-		self._lambda_smooth   =  0.08    # angular smoothness
-		self._lambda_time     = -0.015   # time step penalty
+		self._lambda_bearing  =  0.02    # bearing alignment
+		self._lambda_smooth   =  0.3     # angular smoothness
+		self._lambda_time     = -0.04    # time step penalty
 		self._lambda_goal     = 40.0     # one-time success bonus
+		self._lambda_approach = -5.0     # braking zone speed penalty
 
 		# ---- Reward shaping constants (k) ----
 		self._k1_bearing = -10.0   # sharpness on bearing⁴ (tight peak near 0)
 		self._k2_bearing =  -0.1   # sharpness on bearing² (broad guidance)
+		self._d_slow     =  0.5    # braking zone radius (metres)
 		self._k3_smooth  =  -0.33  # smoothness sensitivity
 
+		# ---- Action repeat (match real Kobuki odom rate: 20 Hz) ----
+		self._action_repeat = 25  # mj_steps per policy step → 0.05s per decision
+
 		# ---- Action noise (sim-to-real: wheel slippage) ----
-		self._slip_sigma = 0.01  # std of multiplicative per-wheel noise (0 = disabled)
+		self._slip_sigma = 0.0  # std of multiplicative per-wheel noise (0 = disabled)
 
 		# ---- Differential-drive kinematics (from URDF/XML) ----
 		self._wheel_radius  = 0.035   # metres  (geom size="0.035 ...")
@@ -204,14 +209,19 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._success = dist < self._success_thresh
 		r_goal = self._lambda_goal if self._success else 0.0
 
+		# 6. Approach braking: penalise speed inside braking zone
+		surge, _ = self._body_frame_velocities()
+		proximity = max(0.0, 1.0 - dist / self._d_slow)  # 0 outside, 1 at goal
+		r_approach = self._lambda_approach * abs(surge) * proximity
+
 		# Update state for next step
 		self._prev_dist = dist
 		self._prev_yaw_rate = yaw_rate
 
-		reward = r_dist + r_bearing + r_smooth + r_time + r_goal
+		reward = r_dist + r_bearing + r_smooth + r_time + r_goal + r_approach
 		self._reward_components = {
 			'r_dist': r_dist, 'r_bearing': r_bearing, 'r_smooth': r_smooth,
-			'r_time': r_time, 'r_goal': r_goal,
+			'r_time': r_time, 'r_goal': r_goal, 'r_approach': r_approach,
 		}
 		return reward
 
@@ -270,8 +280,13 @@ class TB2KobukiGoToEnv(gym.Env):
 			v_r *= 1.0 + np.random.normal(0.0, self._slip_sigma)
 		self.data.ctrl[0] = np.clip(v_l, -self._max_wheel_vel, self._max_wheel_vel)
 		self.data.ctrl[1] = np.clip(v_r, -self._max_wheel_vel, self._max_wheel_vel)
-		mujoco.mj_step(self.model, self.data)
-		reward = self._get_reward()
+		# Action repeat: hold command for multiple physics steps (match 20 Hz odom)
+		reward = 0.0
+		for _ in range(self._action_repeat):
+			mujoco.mj_step(self.model, self.data)
+			reward += self._get_reward()
+			if self._success:
+				break
 		done = self._success
 		info = defaultdict(float)
 		info['success'] = float(self._success)
@@ -293,5 +308,5 @@ def make_env(cfg):
 		raise ValueError(f'Unknown TB2 Kobuki task: {cfg.task}')
 	assert cfg.obs == 'state', 'TB2 Kobuki environment only supports state observations.'
 	env = TB2KobukiGoToEnv(cfg)
-	env = Timeout(env, max_episode_steps=15000)
+	env = Timeout(env, max_episode_steps=600)
 	return env
