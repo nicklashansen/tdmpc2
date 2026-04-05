@@ -12,7 +12,7 @@
     <default class="wheel">
       <joint limited="false" frictionloss="0.1" armature="0.01"/>
       <!-- max wheel angular vel: 0.7 m/s / 0.035 m = 20 rad/s -->
-      <velocity kv="0.1" ctrlrange="-20 20" ctrllimited="true"/>
+      <velocity kv="1.0" ctrlrange="-20 20" ctrllimited="true"/>
       <default class="wheel_left">
         <joint axis="0 0 1"/>
       </default>

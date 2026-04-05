@@ -78,12 +78,12 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._lambda_smooth   =  0.3     # angular smoothness
 		self._lambda_time     = -0.04    # time step penalty
 		self._lambda_goal     = 40.0     # one-time success bonus
-		self._lambda_approach = -5.0     # braking zone speed penalty
+		self._lambda_approach = -0.3     # braking zone speed² penalty
 
 		# ---- Reward shaping constants (k) ----
 		self._k1_bearing = -10.0   # sharpness on bearing⁴ (tight peak near 0)
 		self._k2_bearing =  -0.1   # sharpness on bearing² (broad guidance)
-		self._d_slow     =  0.5    # braking zone radius (metres)
+		self._d_slow     =  0.8    # braking zone radius (metres)
 		self._k3_smooth  =  -0.33  # smoothness sensitivity
 
 		# ---- Action repeat (match real Kobuki odom rate: 20 Hz) ----
@@ -209,10 +209,12 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._success = dist < self._success_thresh
 		r_goal = self._lambda_goal if self._success else 0.0
 
-		# 6. Approach braking: penalise speed inside braking zone
+		# 6. Approach braking: penalise speed² inside braking zone
+		#    surge² makes total penalty proportional to speed (not constant),
+		#    so the robot genuinely learns to decelerate.
 		surge, _ = self._body_frame_velocities()
 		proximity = max(0.0, 1.0 - dist / self._d_slow)  # 0 outside, 1 at goal
-		r_approach = self._lambda_approach * abs(surge) * proximity
+		r_approach = self._lambda_approach * surge**2 * proximity
 
 		# Update state for next step
 		self._prev_dist = dist
