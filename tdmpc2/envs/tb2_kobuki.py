@@ -205,16 +205,16 @@ class TB2KobukiGoToEnv(gym.Env):
 		# 4. Time penalty: constant cost per step → encourages speed
 		r_time = self._lambda_time
 
-		# 5. Goal bonus
-		self._success = dist < self._success_thresh
-		r_goal = self._lambda_goal if self._success else 0.0
-
-		# 6. Approach braking: penalise speed² inside braking zone
+		# 5. Approach braking: penalise speed² inside braking zone
 		#    surge² makes total penalty proportional to speed (not constant),
 		#    so the robot genuinely learns to decelerate.
 		surge, _ = self._body_frame_velocities()
 		proximity = max(0.0, 1.0 - dist / self._d_slow)  # 0 outside, 1 at goal
 		r_approach = self._lambda_approach * surge**2 * proximity
+
+		# 6. Goal bonus — requires near-zero speed to trigger success
+		self._success = dist < self._success_thresh and abs(surge) < 0.01
+		r_goal = self._lambda_goal if self._success else 0.0
 
 		# Update state for next step
 		self._prev_dist = dist

@@ -10,9 +10,10 @@
   <default>
     <!-- Kobuki wheel motor -->
     <default class="wheel">
-      <joint limited="false" frictionloss="0.1" armature="0.01"/>
+      <joint limited="false" frictionloss="0" armature="0.01"/>
       <!-- max wheel angular vel: 0.7 m/s / 0.035 m = 20 rad/s -->
-      <velocity kv="1.0" ctrlrange="-20 20" ctrllimited="true"/>
+      <!-- kv=1.0 + forcerange: ideal velocity controller with 1.0 Nm torque cap (matches Gazebo) -->
+      <velocity kv="1.0" ctrlrange="-20 20" ctrllimited="true" forcerange="-1 1"/>
       <default class="wheel_left">
         <joint axis="0 0 1"/>
       </default>
