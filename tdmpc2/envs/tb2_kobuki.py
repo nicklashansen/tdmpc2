@@ -89,8 +89,9 @@ class TB2KobukiGoToEnv(gym.Env):
 		# ---- Action repeat (match real Kobuki odom rate: 20 Hz) ----
 		self._action_repeat = 25  # mj_steps per policy step → 0.05s per decision
 
-		# ---- Action noise (sim-to-real: wheel slippage) ----
-		self._slip_sigma = 0.0  # std of multiplicative per-wheel noise (0 = disabled)
+		# ---- Domain randomization ----
+		self._slip_sigma = 0.1   # action noise: ±10% multiplicative Gaussian per step
+		self._mass_sigma = 0.2   # mass noise: ±20% multiplicative Gaussian per episode
 
 		# ---- Differential-drive kinematics (from URDF/XML) ----
 		self._wheel_radius  = 0.035   # metres  (geom size="0.035 ...")
@@ -109,6 +110,11 @@ class TB2KobukiGoToEnv(gym.Env):
 		mujoco.mj_resetData(self.model, self.data)
 		mujoco.mj_forward(self.model, self.data)
 		self._init_qpos = self.data.qpos.copy()
+
+		# Store nominal mass & inertia for domain randomization
+		self._base_body_id    = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'base_link')
+		self._nominal_mass    = self.model.body_mass[self._base_body_id].copy()
+		self._nominal_inertia = self.model.body_inertia[self._base_body_id].copy()
 
 		self._target = np.zeros(2, dtype=np.float32)
 		self._success = False
@@ -242,6 +248,13 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._success = False
 		self._episode_count += 1
 
+		# Domain randomization: randomize mass once per episode
+		if self._mass_sigma > 0:
+			scale = 1.0 + np.random.normal(0.0, self._mass_sigma)
+			scale = np.clip(scale, 0.5, 1.5)
+			self.model.body_mass[self._base_body_id] = self._nominal_mass * scale
+			self.model.body_inertia[self._base_body_id] = self._nominal_inertia * scale
+
 		progress = min(self._episode_count / self._curriculum_episodes, 1.0)
 
 		max_angle  = self._angle_start + progress * (self._angle_end - self._angle_start)
@@ -271,15 +284,14 @@ class TB2KobukiGoToEnv(gym.Env):
 
 	def step(self, action):
 		action = np.asarray(action, dtype=np.float64)
+		# Domain randomization: ±10% multiplicative Gaussian noise on action
+		if self._slip_sigma > 0:
+			action = action * (1.0 + np.random.normal(0.0, self._slip_sigma, size=action.shape))
 		# Policy outputs normalised twist; scale to physical units
 		v_linear = action[0] * self._v_linear_max
 		omega    = action[1] * self._omega_max
 		# Convert to per-wheel angular velocities for MuJoCo actuators
 		v_l, v_r = self._twist_to_wheels(v_linear, omega)
-		# Multiplicative wheel noise: simulates slippage / uneven traction
-		if self._slip_sigma > 0:
-			v_l *= 1.0 + np.random.normal(0.0, self._slip_sigma)
-			v_r *= 1.0 + np.random.normal(0.0, self._slip_sigma)
 		self.data.ctrl[0] = np.clip(v_l, -self._max_wheel_vel, self._max_wheel_vel)
 		self.data.ctrl[1] = np.clip(v_r, -self._max_wheel_vel, self._max_wheel_vel)
 		# Action repeat: hold command for multiple physics steps (match 20 Hz odom)
