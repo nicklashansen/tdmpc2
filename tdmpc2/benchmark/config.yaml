@@ -7,9 +7,10 @@ obs: state
 episodic: true
 
 # evaluation
-checkpoint: ???
+checkpoint: benchmark/tdmpc/final.pt
+ppo_checkpoint: benchmark/ppo/final.pt
 eval_episodes: 10
-n_episodes: 5
+n_episodes: 1
 eval_freq: 50000
 
 # training
