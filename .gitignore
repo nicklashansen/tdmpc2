@@ -139,3 +139,5 @@ dmypy.json
 .pyre/
 
 .git_old/
+
+*.csv
