@@ -105,7 +105,9 @@ def main(cfg: dict):
         checkpoint = os.path.join(orig_cwd, checkpoint)
     assert os.path.exists(checkpoint), f'Checkpoint {checkpoint} not found!'
 
-    ppo_checkpoint = os.path.join(orig_cwd, 'benchmark', 'ppo', 'ppo_v2_best_300k.pt')
+    ppo_checkpoint = cfg.get('ppo_checkpoint', os.path.join('benchmark', 'ppo', 'ppo_v2_best_300k.pt'))
+    if not os.path.isabs(ppo_checkpoint):
+        ppo_checkpoint = os.path.join(orig_cwd, ppo_checkpoint)
     assert os.path.exists(ppo_checkpoint), f'PPO checkpoint {ppo_checkpoint} not found!'
 
     # Build agents via wrappers
