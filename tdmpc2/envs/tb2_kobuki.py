@@ -90,7 +90,7 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._action_repeat = 25  # mj_steps per policy step → 0.05s per decision
 
 		# ---- Action noise (sim-to-real: wheel slippage) ----
-		self._slip_sigma = 0.0  # std of multiplicative per-wheel noise (0 = disabled)
+		self._slip_sigma = 0.1  # std of multiplicative per-wheel noise (10% sim-to-real)
 
 		# ---- Differential-drive kinematics (from URDF/XML) ----
 		self._wheel_radius  = 0.035   # metres  (geom size="0.035 ...")
