@@ -26,7 +26,7 @@
   <worldbody>
     <body name="base_link" pos="0 0 0.0102">
       <!-- URDF: mass=2.4, COM=(0.01, 0, 0), ixx=iyy=0.019995, izz=0.03675 -->
-      <inertial pos="0.01 0 0" mass="6.1" diaginertia="0.019995 0.019995 0.03675"/>
+      <inertial pos="0.01 0 0" mass="6.1" diaginertia="0.05082 0.05082 0.09341"/>
       <joint type="free" name="base_joint"/>
 
       <!-- Visual body cylinder (matches collision shape, visual only) -->
