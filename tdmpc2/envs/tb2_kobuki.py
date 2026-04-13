@@ -76,9 +76,11 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._lambda_dist     = 35.0     # distance progress
 		self._lambda_bearing  =  0.02    # bearing alignment
 		self._lambda_smooth   =  0.3     # angular smoothness
+		self._lambda_spin     = -0.002   # spin-in-place penalty: scaled by exp(-5|surge|)
+		self._lambda_forward  =  0.15    # velocity-toward-goal: surge × cos(bearing), clipped ≥ 0
 		self._lambda_time     = -0.04    # time step penalty
 		self._lambda_goal     = 40.0     # one-time success bonus
-		self._lambda_approach = -0.3     # braking zone speed² penalty
+		self._lambda_approach = -0.1     # braking zone speed² penalty (softened for real-robot inertia)
 
 		# ---- Reward shaping constants (k) ----
 		self._k1_bearing = -10.0   # sharpness on bearing⁴ (tight peak near 0)
@@ -193,7 +195,7 @@ class TB2KobukiGoToEnv(gym.Env):
 		dx_b, dy_b = self._body_frame_goal()
 		dist = float(np.hypot(dx_b, dy_b))
 		bearing = float(np.arctan2(dy_b, dx_b))
-		_, yaw_rate = self._body_frame_velocities()
+		surge, yaw_rate = self._body_frame_velocities()
 
 		# 1. Distance progress: reward for getting closer
 		r_dist = self._lambda_dist * (self._prev_dist - dist)
@@ -208,17 +210,20 @@ class TB2KobukiGoToEnv(gym.Env):
 		delta_yaw_rate = abs(yaw_rate - self._prev_yaw_rate)
 		r_smooth = self._lambda_smooth * (np.exp(self._k3_smooth * delta_yaw_rate) - 1.0)
 
+		# 3b. Spin-in-place penalty: penalise spinning when not moving forward
+		r_spin = self._lambda_spin * yaw_rate**2 * np.exp(-5.0 * abs(surge))
+
+		# 3c. Velocity-toward-goal: dense reward for moving in the right direction
+		r_forward = self._lambda_forward * max(0.0, surge * np.cos(bearing))
+
 		# 4. Time penalty: constant cost per step → encourages speed
 		r_time = self._lambda_time
 
 		# 5. Approach braking: penalise speed² inside braking zone
-		#    surge² makes total penalty proportional to speed (not constant),
-		#    so the robot genuinely learns to decelerate.
-		surge, _ = self._body_frame_velocities()
 		proximity = max(0.0, 1.0 - dist / self._d_slow)  # 0 outside, 1 at goal
 		r_approach = self._lambda_approach * surge**2 * proximity
 
-		# 6. Goal bonus — requires near-zero speed to trigger success
+		# 6. Goal bonus
 		self._success = dist < self._success_thresh and abs(surge) < 0.01
 		r_goal = self._lambda_goal if self._success else 0.0
 
@@ -226,9 +231,10 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._prev_dist = dist
 		self._prev_yaw_rate = yaw_rate
 
-		reward = r_dist + r_bearing + r_smooth + r_time + r_goal + r_approach
+		reward = r_dist + r_bearing + r_smooth + r_spin + r_forward + r_time + r_goal + r_approach
 		self._reward_components = {
 			'r_dist': r_dist, 'r_bearing': r_bearing, 'r_smooth': r_smooth,
+			'r_spin': r_spin, 'r_forward': r_forward,
 			'r_time': r_time, 'r_goal': r_goal, 'r_approach': r_approach,
 		}
 		return reward
