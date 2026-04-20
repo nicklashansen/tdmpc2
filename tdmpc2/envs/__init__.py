@@ -37,6 +37,10 @@ try:
 	from envs.tb2_kobuki import make_env as make_tb2_kobuki_env
 except:
 	make_tb2_kobuki_env = missing_dependencies
+try:
+	from envs.tb2_kobuki_ppo import make_env as make_tb2_kobuki_ppo_env
+except:
+	make_tb2_kobuki_ppo_env = missing_dependencies
 
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -73,7 +77,7 @@ def make_env(cfg):
 
 	else:
 		env = None
-		for fn in [make_tb2_kobuki_env, make_tb3_env, make_dm_control_env, make_maniskill_env, make_metaworld_env, make_myosuite_env, make_mujoco_env]:
+		for fn in [make_tb2_kobuki_env, make_tb2_kobuki_ppo_env, make_tb3_env, make_dm_control_env, make_maniskill_env, make_metaworld_env, make_myosuite_env, make_mujoco_env]:
 			try:
 				env = fn(cfg)
 			except ValueError:

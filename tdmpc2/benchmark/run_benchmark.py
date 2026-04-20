@@ -23,12 +23,31 @@ import imageio
 import mujoco
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 from termcolor import colored
 
 from common.parser import parse_cfg
 from common.seed import set_seed
 from envs import make_env
 from benchmark.agents import TDMPCAgent, PPOAgent, PIDAgent
+
+
+def _load_ppo_cfg(tdmpc_cfg):
+    """
+    Load PPO config by merging tdmpc_config.yaml + ppo_config.yaml,
+    then parse it the same way the main TDMPC config is parsed.
+    """
+    orig_cwd = hydra.utils.get_original_cwd()
+    base = OmegaConf.load(os.path.join(orig_cwd, 'benchmark', 'tdmpc', 'tdmpc_config.yaml'))
+    ppo = OmegaConf.load(os.path.join(orig_cwd, 'benchmark', 'ppo', 'ppo_config.yaml'))
+    # Remove Hydra-only 'defaults' keys before merging
+    for cfg in (base, ppo):
+        if 'defaults' in cfg:
+            del cfg['defaults']
+    merged = OmegaConf.merge(base, ppo)
+    merged.task = 'tb2-kobuki-goto-ppo'
+    merged.seed = tdmpc_cfg.seed
+    return parse_cfg(merged)
 
 torch.backends.cudnn.benchmark = True
 
@@ -121,32 +140,43 @@ def _read_state(inner):
     return x, y, yaw, surge, yaw_rate, dist, bearing
 
 
+def _env_const(inner, name):
+    """Read a reward constant from the inner env, supporting both
+    instance attributes (TB2KobukiGoToEnv: _lambda_dist) and
+    class constants (TB2KobukiGoToPPOEnv: _LAMBDA_DIST)."""
+    try:
+        return getattr(inner, name)
+    except AttributeError:
+        return getattr(inner, name.upper())
+
+
 def _compute_rewards(inner, dist, bearing, yaw_rate, surge, prev_dist, prev_yaw_rate, success):
     """
     Compute all reward components from env constants and current state.
-    Formulas taken from TB2KobukiGoToEnv._get_reward().
+    Works with both TB2KobukiGoToEnv and TB2KobukiGoToPPOEnv.
     """
     # Distance progress: reward for getting closer
-    distance_reward = inner._lambda_dist * (prev_dist - dist)
+    distance_reward = _env_const(inner, '_lambda_dist') * (prev_dist - dist)
 
     # Bearing alignment: dual-exponential with sharp peak near 0
-    bearing_quartic = float(np.exp(inner._k1_bearing * bearing**4))
-    bearing_quadratic = float(np.exp(inner._k2_bearing * bearing**2))
-    bearing_reward = inner._lambda_bearing * (bearing_quartic + bearing_quadratic)
+    bearing_quartic = float(np.exp(_env_const(inner, '_k1_bearing') * bearing**4))
+    bearing_quadratic = float(np.exp(_env_const(inner, '_k2_bearing') * bearing**2))
+    bearing_reward = _env_const(inner, '_lambda_bearing') * (bearing_quartic + bearing_quadratic)
 
     # Smoothness: penalise abrupt yaw rate changes
     delta_yaw_rate = abs(yaw_rate - prev_yaw_rate)
-    smoothness_penalty = inner._lambda_smooth * (np.exp(inner._k3_smooth * delta_yaw_rate) - 1.0)
+    smoothness_penalty = _env_const(inner, '_lambda_smooth') * (np.exp(_env_const(inner, '_k3_smooth') * delta_yaw_rate) - 1.0)
 
     # Time penalty: constant cost per sub-step, accumulated over action_repeat
-    time_penalty = inner._lambda_time * inner._action_repeat
+    action_repeat = _env_const(inner, '_action_repeat')
+    time_penalty = _env_const(inner, '_lambda_time') * action_repeat
 
     # Approach braking: penalise speed² inside braking zone
-    proximity = max(0.0, 1.0 - dist / inner._d_slow)
-    approach_penalty = inner._lambda_approach * surge**2 * proximity
+    proximity = max(0.0, 1.0 - dist / _env_const(inner, '_d_slow'))
+    approach_penalty = _env_const(inner, '_lambda_approach') * surge**2 * proximity
 
     # Goal bonus: one-time reward on success
-    goal_bonus = inner._lambda_goal if success else 0.0
+    goal_bonus = _env_const(inner, '_lambda_goal') if success else 0.0
 
     return {
         'distance_reward': float(distance_reward),
@@ -160,34 +190,48 @@ def _compute_rewards(inner, dist, bearing, yaw_rate, surge, prev_dist, prev_yaw_
     }
 
 
-@hydra.main(config_name='config', config_path='.')
+@hydra.main(config_name='tdmpc_config', config_path='tdmpc')
 def main(cfg: dict):
     assert torch.cuda.is_available()
     cfg = parse_cfg(cfg)
     set_seed(cfg.seed)
 
-    # Make env — identical to evaluate.py
+    # ---- TDMPC2 env ----
     env = make_env(cfg)
-    inner = _unwrap(env)
+    # Disable domain randomization for deterministic benchmarking
+    tdmpc_inner = _unwrap(env)
+    tdmpc_inner._slip_sigma = 0.0
+    tdmpc_inner._mass_sigma = 0.0
+
+    # ---- PPO env + config (independent from TDMPC2) ----
+    ppo_cfg = _load_ppo_cfg(cfg)
+    ppo_env = make_env(ppo_cfg)
 
     orig_cwd = hydra.utils.get_original_cwd()
 
-    # Resolve checkpoint paths (Hydra changes cwd)
+    # Resolve TDMPC2 checkpoint path (Hydra changes cwd)
     checkpoint = cfg.checkpoint
     if not os.path.isabs(checkpoint):
         checkpoint = os.path.join(orig_cwd, checkpoint)
     assert os.path.exists(checkpoint), f'Checkpoint {checkpoint} not found!'
 
+    # Resolve PPO checkpoint path
     ppo_checkpoint = cfg.get('ppo_checkpoint', os.path.join('benchmark', 'ppo', 'ppo_v2_best_300k.pt'))
     if not os.path.isabs(ppo_checkpoint):
         ppo_checkpoint = os.path.join(orig_cwd, ppo_checkpoint)
     assert os.path.exists(ppo_checkpoint), f'PPO checkpoint {ppo_checkpoint} not found!'
 
-    # Build agents via wrappers
-    agents = [TDMPCAgent(cfg, checkpoint), PPOAgent(cfg, ppo_checkpoint), PIDAgent()]
+    # Build agents — each with its own config and env
+    agents = [
+        (TDMPCAgent(cfg, checkpoint), env),
+        (PPOAgent(ppo_cfg, ppo_checkpoint), ppo_env),
+        (PIDAgent(), env),
+    ]
 
     print(colored(f'Task: {cfg.task}', 'blue', attrs=['bold']))
     print(colored(f'Model size: {cfg.get("model_size", "default")}', 'blue', attrs=['bold']))
+    print(colored(f'PPO task: {ppo_cfg.task}', 'blue', attrs=['bold']))
+    print(colored(f'PPO model size: {ppo_cfg.get("model_size", "default")}', 'blue', attrs=['bold']))
 
     n_episodes = cfg.get('n_episodes', 5)
     save_video = cfg.get('save_video', False)
@@ -197,20 +241,22 @@ def main(cfg: dict):
     if save_video:
         video_dir = os.path.join(output_dir, 'videos')
         os.makedirs(video_dir, exist_ok=True)
-        # Wide-angle top-down renderer that sees the full 2m goal range
-        vid_renderer = mujoco.Renderer(inner.model, height=480, width=640)
 
-    def _render_wide():
-        cam = mujoco.MjvCamera()
-        cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-        cam.lookat[:] = [1.0, 0.0, 0.0]
-        cam.distance = 5.0
-        cam.elevation = -90
-        cam.azimuth = 0
-        vid_renderer.update_scene(inner.data, camera=cam)
-        return vid_renderer.render()
+    for agent, agent_env in agents:
+        inner = _unwrap(agent_env)
 
-    for agent in agents:
+        if save_video:
+            vid_renderer = mujoco.Renderer(inner.model, height=480, width=640)
+
+        def _render_wide():
+            cam = mujoco.MjvCamera()
+            cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+            cam.lookat[:] = [1.0, 0.0, 0.0]
+            cam.distance = 5.0
+            cam.elevation = -90
+            cam.azimuth = 0
+            vid_renderer.update_scene(inner.data, camera=cam)
+            return vid_renderer.render()
         print(colored(f'\nAgent: {agent.name}', 'green', attrs=['bold']))
 
         summary_rows = []  # collect per-trial data for summary CSV
@@ -231,8 +277,8 @@ def main(cfg: dict):
 
             for ep in range(n_episodes):
                 # Reset — identical to evaluate.py loop
-                env.reset()
-                obs = _set_goal(env, inner, goal_xy)
+                agent_env.reset()
+                obs = _set_goal(agent_env, inner, goal_xy)
 
                 agent.reset()
                 done, cumulative_reward, t = False, 0.0, 0
@@ -264,7 +310,7 @@ def main(cfg: dict):
 
                 while not done:
                     action = agent.get_action(obs)
-                    obs, reward, done, info = env.step(action)
+                    obs, reward, done, info = agent_env.step(action)
                     t += 1
                     cumulative_reward += float(reward)
 

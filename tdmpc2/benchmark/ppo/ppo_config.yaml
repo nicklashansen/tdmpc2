@@ -1,0 +1,108 @@
+defaults:
+    - /tdmpc/tdmpc_config  # inherit all TD-MPC2 base fields (absolute from search path root)
+    - _self_          # this file's keys override the base
+
+# -----------------------------------------------------------------------
+# Fields from config.yaml that are irrelevant to PPO – give them safe
+# values so parse_cfg doesn't complain about missing required fields.
+# -----------------------------------------------------------------------
+checkpoint: null
+data_dir: null
+exp_name: ppo
+
+# -----------------------------------------------------------------------
+# PPO on-policy training
+# -----------------------------------------------------------------------
+
+# Number of environment steps collected before each gradient update.
+# Should be >> episode_length to span several episodes per rollout.
+n_steps: 16384
+
+# Discount factor (PPO uses a fixed scalar; TD-MPC2 uses an adaptive one).
+gamma: 0.99
+
+# GAE-λ: 1.0 = pure Monte Carlo returns, 0.0 = pure TD(0).
+gae_lambda: 0.95
+
+# PPO epochs – how many full passes over a rollout before discarding it.
+ppo_epochs: 10
+
+# Value-only warm-up epochs run BEFORE each PPO update (every rollout).
+# Keeps V(s) calibrated as difficulty slowly increases, so policy gradients
+# have correct advantage estimates and don't cause catastrophic forgetting.
+value_warmup_epochs: 0
+
+# Mini-batch size within each PPO epoch.
+ppo_batch_size: 64
+
+# PPO clipping range ε.
+clip_eps: 0.2
+
+# Early stopping: halt epoch iterations when KL divergence exceeds this.
+# Prevents policy overshoot — the primary cause of training instability.
+target_kl: 0.01
+
+# Coefficient for the value-function loss term.
+ppo_value_coef: 0.5
+
+# Coefficient for the entropy bonus (encourages exploration).
+ppo_entropy_coef: 0.001
+
+# Noise guard: skip policy gradient when rollout success >= this threshold.
+# Prevents near-zero advantage variance from injecting destructive noise.
+# Lower = more conservative (policy frozen more often). 0 = disabled.
+noise_guard_threshold: 0.0
+
+# Value-only warmup rollouts after each curriculum difficulty advance.
+# Gives V(s) time to recalibrate at the new difficulty before policy is updated.
+curriculum_advance_warmup: 2
+
+# Curriculum learning: heading error grows from 0 to π over this many steps.
+# 0 = start facing goal exactly. At curriculum_steps the full random task begins.
+# Set to 0 to disable curriculum (full random heading from the start).
+# Step-based curriculum (used only if curriculum_success_threshold is 0)
+curriculum_steps: 10_000_000
+
+# Success-based curriculum: difficulty only increases when the policy
+# achieves avg success >= threshold over the last `window` rollouts.
+# Set curriculum_success_threshold: 0 to disable and fall back to step-based.
+# Starting difficulty (0.0 = easy, 1.0 = full task).
+# Set to e.g. 0.5 to skip the easy phase entirely.
+curriculum_start: 0.0
+curriculum_success_threshold: 0
+curriculum_fail_threshold: 0.3
+curriculum_difficulty_step: 0.05
+curriculum_window: 10
+
+# -----------------------------------------------------------------------
+# Shared hypers (override base defaults as needed)
+# -----------------------------------------------------------------------
+
+# Learning rate – same default as TD-MPC2 for fair comparison.
+lr: 1e-4
+
+# Gradient clipping (tighter than TD-MPC2's 20, standard for PPO).
+grad_clip_norm: 0.5
+
+# Policy log-std bounds – identical to TD-MPC2.
+log_std_min: -10
+log_std_max: 2
+
+# Evaluate every this many environment steps.
+eval_freq: 50000
+
+# Number of episodes per evaluation.
+eval_episodes: 10
+
+# -----------------------------------------------------------------------
+# Architecture – default to the 5M model_size for comparison; override
+# on the command line with  model_size=1  etc.
+# -----------------------------------------------------------------------
+model_size: 5
+
+# -----------------------------------------------------------------------
+# Eval-only fields (used by eval_ppo.py)
+# -----------------------------------------------------------------------
+difficulty: 0.5
+n_episodes: 100
+n_videos: 5

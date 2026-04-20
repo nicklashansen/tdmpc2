@@ -24,7 +24,7 @@ _ASSETS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'
 _SCENE_XML  = os.path.join(_ASSETS_DIR, 'scene.xml')
 
 
-class TB2KobukiGoToEnv(gym.Env):
+class TB2KobukiGoToPPOEnv(gym.Env):
 	"""
 	TurtleBot2 Kobuki differential-drive 'Go To' task.
 
@@ -56,55 +56,53 @@ class TB2KobukiGoToEnv(gym.Env):
 	"""
 
 	metadata = {'render_modes': ['rgb_array']}
+	_GOAL_RADIUS_MIN     = 0.3   # metres — TD-MPC2 minimum goal distance
+	_GOAL_RADIUS_MIN_PPO = 0.5   # metres — PPO minimum (scaled for 0.22 m/s robot)
+	_GOAL_RADIUS_MAX     = 3.0   # metres — reachable within episode
+	_SUCCESS_THRESH  = 0.15  # metres — goal reached if closer than this
+
+	# ---- Curriculum: progressively harder goals ----
+	_CURRICULUM_EPISODES = 500   # episodes to go from easy → full difficulty (~250k steps)
+	_ANGLE_START  = np.pi / 4   # ±45° in front at the beginning
+	_ANGLE_END    = np.pi       # full 360° at the end
+	_RADIUS_START = 0.3         # close goals at the beginning
+	_RADIUS_END   = 3.0         # full range at the end
+
+	# ---- Reward weights (λ) ----
+	_LAMBDA_DIST     = 35.0   # distance progress
+	_LAMBDA_BEARING  =  0.02  # bearing alignment (balanced: ~cancels time penalty when facing goal)
+	_LAMBDA_SMOOTH   =  0.3   # angular smoothness (keep subordinate)
+	_LAMBDA_SPIN     = -0.002  # spin-in-place penalty: scaled by exp(-5|surge|) in _get_reward
+	_LAMBDA_FORWARD  =  0.15  # velocity-toward-goal: max(0,surge) × cos(bearing) per physics step
+	_LAMBDA_TIME     = -0.04  # time step penalty
+	_LAMBDA_GOAL     = 40.0   # one-time success bonus
+	_LAMBDA_APPROACH = -0.1   # braking zone speed² penalty (softened for 6kg inertia)
+
+	# ---- Reward shaping constants (k) ----
+	_K1_BEARING = -10.0   # sharpness on bearing⁴ (tight peak near 0)
+	_K2_BEARING =  -0.1   # sharpness on bearing² (broad guidance)
+	_K3_SMOOTH  =  -0.33  # smoothness sensitivity
+	_D_SLOW     =   0.8   # braking zone radius (metres)
+
+	# ---- Action repeat (match real Kobuki odom rate: 20 Hz) ----
+	_ACTION_REPEAT = 25   # mj_steps per policy step → 0.05 s per decision
+
+	# ---- Action noise (sim-to-real: wheel slippage) ----
+	_SLIP_SIGMA = 0.0   # std of multiplicative per-wheel noise (0 = disabled)
+
+	# ---- Differential-drive kinematics (from URDF/XML) ----
+	_WHEEL_RADIUS = 0.035   # metres  (geom size="0.035 ...")
+	_WHEELBASE    = 0.230   # metres  (wheels at y = ±0.115)
+	_MAX_WHEEL_VEL = 20.0   # rad/s   (ctrlrange="-20 20")
+
+	# Twist limits matching the real Kobuki robot
+	_V_LINEAR_MAX = 0.22   # m/s  (real robot limit)
+	_OMEGA_MAX    = 2.84   # rad/s (real robot limit)
 
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
 
-		# ---- Goal sampling ----
-		self._goal_radius_min = 0.3   # metres
-		self._success_thresh  = 0.15  # metres — goal reached if closer than this
-
-		# ---- Curriculum: progressively harder goals ----
-		self._curriculum_episodes = 500   # episodes to go from easy → full difficulty
-		self._angle_start  = np.pi / 4   # ±45° in front at the beginning
-		self._angle_end    = np.pi       # full 360° at the end
-		self._radius_start = 0.3         # close goals at the beginning
-		self._radius_end   = 3.0         # full range at the end
-
-		# ---- Reward weights (λ) ----
-		self._lambda_dist     = 35.0     # distance progress
-		self._lambda_bearing  =  0.02    # bearing alignment
-		self._lambda_smooth   =  0.3     # angular smoothness
-		self._lambda_spin     = -0.002   # spin-in-place penalty: scaled by exp(-5|surge|)
-		self._lambda_forward  =  0.15    # velocity-toward-goal: surge × cos(bearing), clipped ≥ 0
-		self._lambda_time     = -0.04    # time step penalty
-		self._lambda_goal     = 40.0     # one-time success bonus
-		self._lambda_approach = -0.1     # braking zone speed² penalty (softened for real-robot inertia)
-
-		# ---- Reward shaping constants (k) ----
-		self._k1_bearing = -10.0   # sharpness on bearing⁴ (tight peak near 0)
-		self._k2_bearing =  -0.1   # sharpness on bearing² (broad guidance)
-		self._d_slow     =  0.8    # braking zone radius (metres)
-		self._k3_smooth  =  -0.33  # smoothness sensitivity
-
-		# ---- Action repeat (match real Kobuki odom rate: 20 Hz) ----
-		self._action_repeat = 25  # mj_steps per policy step → 0.05s per decision
-
-		# ---- Domain randomization ----
-		self._slip_sigma = 0.1   # action noise: ±10% multiplicative Gaussian per step
-		self._mass_sigma = 0.2   # mass noise: ±20% multiplicative Gaussian per episode
-
-		# ---- Differential-drive kinematics (from URDF/XML) ----
-		self._wheel_radius  = 0.035   # metres  (geom size="0.035 ...")
-		self._wheelbase     = 0.230   # metres  (wheels at y = ±0.115)
-		self._max_wheel_vel = 20.0    # rad/s   (ctrlrange="-20 20")
-
-		# Twist limits matching the real Kobuki robot
-		self._v_linear_max = 0.22   # m/s 
-		self._omega_max    = 2.84   # rad/s 
-
-		# ---- MuJoCo model ----
 		self.model = mujoco.MjModel.from_xml_path(_SCENE_XML)
 		self.data  = mujoco.MjData(self.model)
 
@@ -112,11 +110,6 @@ class TB2KobukiGoToEnv(gym.Env):
 		mujoco.mj_resetData(self.model, self.data)
 		mujoco.mj_forward(self.model, self.data)
 		self._init_qpos = self.data.qpos.copy()
-
-		# Store nominal mass & inertia for domain randomization
-		self._base_body_id    = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'base_link')
-		self._nominal_mass    = self.model.body_mass[self._base_body_id].copy()
-		self._nominal_inertia = self.model.body_inertia[self._base_body_id].copy()
 
 		self._target = np.zeros(2, dtype=np.float32)
 		self._success = False
@@ -127,6 +120,8 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._prev_dist     = 0.0
 		self._prev_yaw_rate = 0.0
 		self._episode_count = 0
+		self._use_ppo_curriculum = False  # only True when set_curriculum() is called (PPO)
+		self._ppo_difficulty     = 0.0    # grows 0 → 1 over training
 
 		self.observation_space = gym.spaces.Box(
 			low=-np.inf, high=np.inf, shape=(5,), dtype=np.float32
@@ -134,6 +129,20 @@ class TB2KobukiGoToEnv(gym.Env):
 		self.action_space = gym.spaces.Box(
 			low=np.float32(-1.0), high=np.float32(1.0), shape=(2,), dtype=np.float32
 		)
+
+	# ------------------------------------------------------------------
+	# Curriculum  (PPO only — TD-MPC2 never calls this)
+	# ------------------------------------------------------------------
+
+	def set_curriculum(self, difficulty):
+		"""
+		PPO-controlled curriculum based on training steps, not episode count.
+		  difficulty=0.0 → goals at ±45°, radius 0.3m  (easy)
+		  difficulty=1.0 → goals at ±180°, radius 3.0m  (full task)
+		TD-MPC2 never calls this so its episode-count curriculum is unchanged.
+		"""
+		self._use_ppo_curriculum = True
+		self._ppo_difficulty     = float(np.clip(difficulty, 0.0, 1.0))
 
 	# ------------------------------------------------------------------
 	# Helpers
@@ -185,7 +194,7 @@ class TB2KobukiGoToEnv(gym.Env):
 			dtype=np.float32
 		)
 
-	def _get_reward(self):
+	def _get_reward(self, action):
 		"""
 		Five-term compound reward.
 		All terms are designed so cumulative return stays negative until
@@ -198,44 +207,44 @@ class TB2KobukiGoToEnv(gym.Env):
 		surge, yaw_rate = self._body_frame_velocities()
 
 		# 1. Distance progress: reward for getting closer
-		r_dist = self._lambda_dist * (self._prev_dist - dist)
+		r_dist = self._LAMBDA_DIST * (self._prev_dist - dist)
 
 		# 2. Bearing alignment: dual-exponential with sharp peak near 0
-		r_bearing = self._lambda_bearing * (
-			np.exp(self._k1_bearing * bearing**4) +
-			np.exp(self._k2_bearing * bearing**2)
+		r_bearing = self._LAMBDA_BEARING * (
+			np.exp(self._K1_BEARING * bearing**4) +
+			np.exp(self._K2_BEARING * bearing**2)
 		)
 
 		# 3. Smoothness: penalise abrupt yaw rate changes
 		delta_yaw_rate = abs(yaw_rate - self._prev_yaw_rate)
-		r_smooth = self._lambda_smooth * (np.exp(self._k3_smooth * delta_yaw_rate) - 1.0)
+		r_smooth = self._LAMBDA_SMOOTH * (np.exp(self._K3_SMOOTH * delta_yaw_rate) - 1.0)
 
 		# 3b. Spin-in-place penalty: penalise spinning when not moving forward
-		r_spin = self._lambda_spin * yaw_rate**2 * np.exp(-5.0 * abs(surge))
+		r_spin = self._LAMBDA_SPIN * yaw_rate**2 * np.exp(-5.0 * abs(surge))
 
-		# 3c. Velocity-toward-goal: dense reward for moving in the right direction
-		r_forward = self._lambda_forward * max(0.0, surge * np.cos(bearing))
+		# 3c. Velocity-toward-goal: reward moving toward the goal
+		r_forward = self._LAMBDA_FORWARD * max(0.0, surge * np.cos(bearing))
 
 		# 4. Time penalty: constant cost per step → encourages speed
-		r_time = self._lambda_time
+		r_time = self._LAMBDA_TIME
 
 		# 5. Approach braking: penalise speed² inside braking zone
-		proximity = max(0.0, 1.0 - dist / self._d_slow)  # 0 outside, 1 at goal
-		r_approach = self._lambda_approach * surge**2 * proximity
+		proximity = max(0.0, 1.0 - dist / self._D_SLOW)  # 0 outside, 1 at goal
+		r_approach = self._LAMBDA_APPROACH * surge**2 * proximity
 
-		# 6. Goal bonus
-		self._success = dist < self._success_thresh and abs(surge) < 0.01
-		r_goal = self._lambda_goal if self._success else 0.0
+		# 6. Goal bonus — requires near-zero speed to trigger success
+		self._success = dist < self._SUCCESS_THRESH
+		r_goal = self._LAMBDA_GOAL if self._success else 0.0
 
 		# Update state for next step
 		self._prev_dist = dist
 		self._prev_yaw_rate = yaw_rate
 
-		reward = r_dist + r_bearing + r_smooth + r_spin + r_forward + r_time + r_goal + r_approach
+		reward = r_dist + r_bearing + r_smooth + r_spin + r_forward + r_time + r_approach + r_goal
 		self._reward_components = {
 			'r_dist': r_dist, 'r_bearing': r_bearing, 'r_smooth': r_smooth,
 			'r_spin': r_spin, 'r_forward': r_forward,
-			'r_time': r_time, 'r_goal': r_goal, 'r_approach': r_approach,
+			'r_time': r_time, 'r_approach': r_approach, 'r_goal': r_goal,
 		}
 		return reward
 
@@ -254,21 +263,20 @@ class TB2KobukiGoToEnv(gym.Env):
 		self._success = False
 		self._episode_count += 1
 
-		# Domain randomization: randomize mass once per episode
-		if self._mass_sigma > 0:
-			scale = 1.0 + np.random.normal(0.0, self._mass_sigma)
-			scale = np.clip(scale, 0.5, 1.5)
-			self.model.body_mass[self._base_body_id] = self._nominal_mass * scale
-			self.model.body_inertia[self._base_body_id] = self._nominal_inertia * scale
+		if self._use_ppo_curriculum:
+			# PPO path: difficulty set externally by PPOTrainer based on steps
+			progress = self._ppo_difficulty
+		else:
+			# TD-MPC2 path: original episode-count curriculum, completely unchanged
+			progress = min(self._episode_count / self._CURRICULUM_EPISODES, 1.0)
 
-		progress = min(self._episode_count / self._curriculum_episodes, 1.0)
-
-		max_angle  = self._angle_start + progress * (self._angle_end - self._angle_start)
-		max_radius = self._radius_start + progress * (self._radius_end - self._radius_start)
+		max_angle  = self._ANGLE_START + progress * (self._ANGLE_END - self._ANGLE_START)
+		max_radius = self._RADIUS_START + progress * (self._RADIUS_END - self._RADIUS_START)
 
 		# Goal angle centred on robot's forward direction (yaw=0 at reset)
 		angle  = np.random.uniform(-max_angle, max_angle)
-		radius = np.random.uniform(self._goal_radius_min, max_radius)
+		goal_radius_min = self._GOAL_RADIUS_MIN_PPO if self._use_ppo_curriculum else self._GOAL_RADIUS_MIN
+		radius = np.random.uniform(goal_radius_min, max_radius)
 		self._target = np.array(
 			[radius * np.cos(angle), radius * np.sin(angle)], dtype=np.float32
 		)
@@ -284,27 +292,28 @@ class TB2KobukiGoToEnv(gym.Env):
 
 	def _twist_to_wheels(self, v_linear, omega):
 		"""Inverse diff-drive kinematics: twist → wheel angular velocities."""
-		v_l = (v_linear - omega * self._wheelbase / 2.0) / self._wheel_radius
-		v_r = (v_linear + omega * self._wheelbase / 2.0) / self._wheel_radius
+		v_l = (v_linear - omega * self._WHEELBASE / 2.0) / self._WHEEL_RADIUS
+		v_r = (v_linear + omega * self._WHEELBASE / 2.0) / self._WHEEL_RADIUS
 		return v_l, v_r
 
 	def step(self, action):
 		action = np.asarray(action, dtype=np.float64)
-		# Domain randomization: ±10% multiplicative Gaussian noise on action
-		if self._slip_sigma > 0:
-			action = action * (1.0 + np.random.normal(0.0, self._slip_sigma, size=action.shape))
 		# Policy outputs normalised twist; scale to physical units
-		v_linear = action[0] * self._v_linear_max
-		omega    = action[1] * self._omega_max
+		v_linear = action[0] * self._V_LINEAR_MAX
+		omega    = action[1] * self._OMEGA_MAX
 		# Convert to per-wheel angular velocities for MuJoCo actuators
 		v_l, v_r = self._twist_to_wheels(v_linear, omega)
-		self.data.ctrl[0] = np.clip(v_l, -self._max_wheel_vel, self._max_wheel_vel)
-		self.data.ctrl[1] = np.clip(v_r, -self._max_wheel_vel, self._max_wheel_vel)
-		# Action repeat: hold command for multiple physics steps (match 20 Hz odom)
+		# Multiplicative wheel noise: simulates slippage / uneven traction
+		if self._SLIP_SIGMA > 0:
+			v_l *= 1.0 + np.random.normal(0.0, self._SLIP_SIGMA)
+			v_r *= 1.0 + np.random.normal(0.0, self._SLIP_SIGMA)
+		self.data.ctrl[0] = np.clip(v_l, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
+		self.data.ctrl[1] = np.clip(v_r, -self._MAX_WHEEL_VEL, self._MAX_WHEEL_VEL)
+		# Action repeat: hold command for multiple physics steps, accumulate reward
 		reward = 0.0
-		for _ in range(self._action_repeat):
+		for _ in range(self._ACTION_REPEAT):
 			mujoco.mj_step(self.model, self.data)
-			reward += self._get_reward()
+			reward += self._get_reward(action)
 			if self._success:
 				break
 		done = self._success
@@ -323,10 +332,10 @@ class TB2KobukiGoToEnv(gym.Env):
 # ---------------------------------------------------------------------------
 
 def make_env(cfg):
-	"""Entry point used by envs/__init__.py. Task name: 'tb2-kobuki-goto'."""
-	if cfg.task != 'tb2-kobuki-goto':
-		raise ValueError(f'Unknown TB2 Kobuki task: {cfg.task}')
+	"""Entry point used by envs/__init__.py. Task name: 'tb2-kobuki-goto-ppo'."""
+	if cfg.task != 'tb2-kobuki-goto-ppo':
+		raise ValueError(f'Unknown TB2 Kobuki PPO task: {cfg.task}')
 	assert cfg.obs == 'state', 'TB2 Kobuki environment only supports state observations.'
-	env = TB2KobukiGoToEnv(cfg)
+	env = TB2KobukiGoToPPOEnv(cfg)
 	env = Timeout(env, max_episode_steps=600)
 	return env
