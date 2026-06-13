@@ -1,0 +1,115 @@
+[wandb]
+project = "rot|td3_quadrotors"
+group = ""
+entity = "lsy-tum"
+
+[env]
+name = "DroneFigureEightTrajectory-v0"
+n_envs = 1024
+n_eval_envs = 64
+
+[env.kwargs]
+n_samples = 10
+trajectory_time = 10.0
+physics = "analytical"
+freq = 50
+device = "gpu"
+
+[env.wrapper.kwargs]
+action_type = "tangent"
+obs_type = "matrix"
+control_mode = "rel"
+
+[td3]
+# General params
+device = "cuda"
+# Rollout params
+n_steps = 768_000
+# Training params
+actor_lr = 0.003
+critic_lr = 0.001
+buffer_size = 768_000
+train_period = 6144
+train_steps = 1024
+actor_period = 1
+critic_period = 1
+actor_target_period = 40
+critic_target_period = 20
+tau = 0.02
+gamma = 0.98
+grad_clip = 5.0
+batch_size = 1024
+reward_clip = [-1.0, 500.0]
+# Eval params
+eval_period = 32_768
+eval_steps = 32_000  # 64 * 500
+# Checkpoint params
+checkpoint_path = "saves/td3"
+checkpoint_buffer = false
+# Action transform -> Uniform Noise with probability 0.3 and clipping to [-1.0, 1.0]
+[[td3.action_tf]]
+type = "ChoiceTF"
+[td3.action_tf.kwargs]
+prob = [0.7, 0.3]
+[[td3.action_tf.kwargs.transforms]]
+type = "IdentityTF"
+[[td3.action_tf.kwargs.transforms]]
+type = "ReplaceWithNoiseTF"
+[td3.action_tf.kwargs.transforms.kwargs.noise]
+type = "UniformNoise"
+[td3.action_tf.kwargs.transforms.kwargs.noise.kwargs]
+min = -1.0
+max = 1.0
+[[td3.action_tf]]
+type = "ClipTF"
+[td3.action_tf.kwargs]
+min = -1.0
+max = 1.0
+# Target action transform: Gaussian noise with mean 0.0 and std 0.2#
+[[td3.target_action_tf]]
+type = "AdditiveNoiseTF"
+[td3.target_action_tf.kwargs.noise]
+type = "NormalNoise"
+[td3.target_action_tf.kwargs.noise.kwargs]
+mean = 0.0
+std = 0.1
+# No eval action transform or train action transform
+
+[overrides]
+[overrides.tangent-matrix-dense]  # https://wandb.ai/lsy-tum/rot|td3_sweep/runs/9r6747kx?nw=nwuseru1999168
+actor_lr = 2.20e-4
+actor_period = 2
+actor_target_period = 80
+batch_size = 4096
+critic_lr = 2.65e-3
+critic_period = 1
+critic_target_period = 20
+gamma = 0.971
+tau = 9.62e-2
+train_steps = 1024
+
+[overrides.euler-matrix-dense]  # https://wandb.ai/lsy-tum/rot%7Ctd3_sweep/runs/x2pu9dwx/overview?nw=nwuseramacati
+actor_lr = 2.00e-4
+actor_period = 1
+actor_target_period = 80
+batch_size = 1024
+critic_lr = 2.65e-3
+critic_period = 1
+critic_target_period = 10
+gamma = 0.949
+tau = 0.0862
+train_steps = 1024
+
+[overrides.matrix-matrix-dense]
+
+[overrides.quat-matrix-dense]  # https://wandb.ai/lsy-tum/rot%7Ctd3_sweep/runs/5pquaklf?nw=nwuseramacati
+actor_lr = 1.93e-4
+actor_period = 4
+actor_target_period = 80
+batch_size = 2048
+critic_lr = 1.8e-3
+critic_period = 1
+critic_target_period = 10
+gamma = 0.974
+tau = 0.08
+train_steps = 1024

@@ -1,0 +1,20 @@
+program = "benchmarks/droneracing/sac_sweep.py"
+method = "bayes"
+
+[metric]
+name = "eval/mean_target_gate"
+goal = "maximize"
+
+[parameters]
+
+actor_lr = { distribution = "log_uniform_values", min = 0.0001, max = 0.01 }
+critic_lr = { distribution = "log_uniform_values", min = 0.0001, max = 0.01 }
+alpha_lr = { distribution = "log_uniform_values", min = 0.001, max = 0.1 }
+eps = { distribution = "log_uniform_values", min = 1e-8, max = 1e-4 }
+gamma = { distribution = "uniform", min = 0.8, max = 0.99 }
+tau = { distribution = "log_uniform_values", min = 0.001, max = 0.1 }
+batch_size = { values = [1024, 2048, 4096] }
+alpha = { distribution = "uniform", min = 0.01, max = 1.0 }
+actor_period = { values = [1, 2, 4, 8] }
+critic_period = { values = [1, 2, 4, 8] }
+target_period = { values = [10, 20, 40, 80] }

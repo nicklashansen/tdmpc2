@@ -1,0 +1,18 @@
+program = "benchmarks/crazyflow/ppo_sweep.py"
+method = "bayes"
+
+[metric]
+name = "eval/mean_reward"
+goal = "maximize"
+
+[parameters]
+n_minibatches = { values = [4, 8, 16, 32] }
+n_steps = { values = [8, 16, 32, 64] }
+n_epochs = { values = [5, 10, 15, 20] }
+actor_lr = { distribution = "log_uniform_values", min = 0.0001, max = 0.005 }
+critic_lr = { distribution = "log_uniform_values", min = 0.0001, max = 0.005 }
+clip_coef = { min = 0.1, max = 0.3 }
+ent_coef = { distribution = "log_uniform_values", min = 0.000001, max = 0.1 }
+max_grad_norm = { min = 0.5, max = 2.0 }
+gamma = { distribution = "uniform", min = 0.8, max = 0.99 }
+gae_lambda = { distribution = "uniform", min = 0.8, max = 0.99 }

@@ -1,0 +1,117 @@
+[wandb]
+project = "rot|sac_quadrotors"
+group = ""
+entity = "lsy-tum"
+
+[env]
+name = "DroneRacing-v0"
+n_envs = 1024
+n_eval_envs = 64
+
+# Environment configuration is based on https://github.com/utiasDSL/lsy_drone_racing/blob/dev/config/level0.toml
+[env.kwargs]
+freq = 50                   # Frequency of the environment's step function, in Hz
+sensor_range = 0.7          # Range at which the exact location of gates and obstacles become visible to the drone. Objects that are not in the drone's sensor range report their nominal position.
+control_mode = "attitude"   # Control mode of the environment. Must be "attitude"
+seed = 1337                 # Random seed
+max_episode_steps = 1_500   # Maximum number of steps per episode before truncation
+device = "gpu"              # Device used for the environment and the simulation
+
+[env.kwargs.sim_config]
+physics = "analytical"
+camera_view = [5.0, -40.0, -40.0, 0.5, -1.0, 0.5]
+freq = 500                                          # Simulation frequency, in Hz
+attitude_freq = 500                                 # Controller frequency, in Hz. This frequency is used to simulate the onboard controller, NOT for the environment's step function
+gui = false                                         # Enable/disable PyBullet's GUI
+
+[env.kwargs.track]
+# Tall gates: 1.0m height. Short gates: 0.525m height. Height is measured from the ground to the
+# center of the gate.
+[[env.kwargs.track.gates]]
+pos = [0.45, -0.5, 0.56]
+rpy = [0.0, 0.0, 2.35]
+[[env.kwargs.track.gates]]
+pos = [1.0, -1.05, 1.11]
+rpy = [0.0, 0.0, -0.78]
+[[env.kwargs.track.gates]]
+pos = [0.0, 1.0, 0.56]
+rpy = [0.0, 0.0, 0.0]
+[[env.kwargs.track.gates]]
+pos = [-0.5, 0.0, 1.11]
+rpy = [0.0, 0.0, 3.14]
+
+# Obstacle height: 1.4m. Height is measured from the ground to the top of the obstacle.
+[[env.kwargs.track.obstacles]]
+pos = [1.0, 0.0, 1.4]
+[[env.kwargs.track.obstacles]]
+pos = [0.5, -1.0, 1.4]
+[[env.kwargs.track.obstacles]]
+pos = [0.0, 1.5, 1.4]
+[[env.kwargs.track.obstacles]]
+pos = [-0.5, 0.5, 1.4]
+
+[[env.kwargs.track.drones]]
+pos = [1.0, 1.5, 0.07]
+rpy = [0, 0, 0]
+vel = [0, 0, 0]
+ang_vel = [0, 0, 0]
+
+# Action or dynamics disturbances disabled
+# [[env.kwargs.disturbances]]
+
+# Inertial parameters and gate randomizations disabled
+# [[env.kwargs.randomizations]]
+
+[env.wrapper.kwargs]
+action_type = "tangent"
+obs_type = "matrix"
+control_mode = "rel"
+
+[env.reward.kwargs]     # https://wandb.ai/lsy-tum/rot|ppo_sweep/runs/eyqxnhie?nw=nwuseru1999168
+progress_weight = 10.0
+crash_weight = -3.64
+vel_weight = -0.106
+finished_weight = 10.0
+action_weight = -8.22e-3
+
+[sac]
+# General params
+device = "cuda"
+# Rollout params
+n_steps = 7_995_392
+# Training params
+actor_lr = 0.003
+critic_lr = 0.001
+buffer_size = 4_997_120
+eps = 1e-8
+train_period = 24_576
+train_steps = 4096
+actor_period = 1
+critic_period = 1
+target_period = 20
+tau = 0.02
+gamma = 0.975
+grad_clip = 2.5
+batch_size = 1024
+alpha = 0.045
+autotune_alpha = true
+alpha_lr = 0.03
+learning_starts = 0
+# Eval params
+eval_period = 499_712
+eval_steps = 96_000           # 64 * 1500
+# Checkpoint params
+checkpoint_path = "saves/sac"
+checkpoint_buffer = false
+# Action transform
+[[sac.action_tf]]
+type = "IdentityTF"
+
+[overrides]
+[overrides.tangent-matrix-dense]
+
+[overrides.euler-matrix-dense]
+
+[overrides.matrix-matrix-dense]
+
+[overrides.quat-matrix-dense]

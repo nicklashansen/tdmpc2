@@ -1,0 +1,122 @@
+[wandb]
+project = "rot|td3_her"
+group = ""
+entity = "lsy-tum"
+
+[env]
+name = "Reach-v0"
+n_envs = 32
+[env.kwargs]
+
+[env.wrapper.kwargs]
+action_type = "tangent"
+obs_type = "matrix"
+control_mode = "rel"
+
+[td3]
+# General params
+device = "gpu" # Envs run on GPU
+# Rollout params
+n_steps = 1_000_000
+# Training params
+actor_lr = 0.001
+critic_lr = 0.0005
+buffer_size = 1_000_000
+train_period = 2_500
+train_steps = 1_000
+actor_period = 1
+critic_period = 1
+actor_target_period = 5
+critic_target_period = 5
+tau = 0.005
+gamma = 0.99
+grad_clip = 5.0
+batch_size = 128
+reward_clip = [0.0, 500.0] # Should we use this?
+# Eval params
+eval_period = 2_500
+eval_steps = 4_000  # Deviation from benchmark (2_500)
+# Checkpoint params
+checkpoint_path = "saves/her/td3"
+checkpoint_buffer = false
+
+# Action transform -> Uniform Noise with probability 0.3 and clipping to [-1.0, 1.0]
+[[td3.action_tf]]
+type = "ChoiceTF"
+[td3.action_tf.kwargs]
+prob = [0.7, 0.3]
+[[td3.action_tf.kwargs.transforms]]
+type = "IdentityTF"
+[[td3.action_tf.kwargs.transforms]]
+type = "ReplaceWithNoiseTF"
+[td3.action_tf.kwargs.transforms.kwargs.noise]
+type = "UniformNoise"
+[td3.action_tf.kwargs.transforms.kwargs.noise.kwargs]
+min = -1.0
+max = 1.0
+[[td3.action_tf]]
+type = "ClipTF"
+[td3.action_tf.kwargs]
+min = -1.0
+max = 1.0
+# Target action transform: Gaussian noise with mean 0.0 and std 0.2
+[[td3.target_action_tf]]
+type = "AdditiveNoiseTF"
+[td3.target_action_tf.kwargs.noise]
+type = "NormalNoise"
+[td3.target_action_tf.kwargs.noise.kwargs]
+mean = 0.0
+std = 0.1
+# No eval action transform or train action transform
+
+[overrides.euler-matrix] # https://wandb.ai/lsy-tum/rot%7Ctd3_sweep/sweeps/17988cj3?nw=nwuseramacati
+actor_lr = 4.76e-4
+actor_period = 2
+actor_target_period = 80
+batch_size = 8192
+critic_lr = 8.54e-3
+critic_period = 1
+critic_target_period = 80
+eps = 4.80e-6
+gamma = 0.946
+tau = 5.98e-2
+train_steps = 20
+
+[overrides.tangent-matrix] # https://wandb.ai/lsy-tum/rot%7Ctd3_sweep/sweeps/chpctou9/workspace?nw=nwuseramacati
+actor_lr = 5.41e-3
+actor_period = 4
+actor_target_period = 20
+batch_size = 8192
+critic_lr = 1.16e-3
+critic_period = 1
+critic_target_period = 80
+eps = 1.13e-6
+gamma = 9.02e-1
+tau = 4.59e-2
+train_steps = 20
+
+[overrides.quat-matrix] # https://wandb.ai/lsy-tum/rot%7Ctd3_sweep/sweeps/69d795et?nw=nwuseramacati
+actor_lr = 1.83e-4
+actor_period = 4
+actor_target_period = 10
+batch_size = 4096
+critic_lr = 6.00e-3
+critic_period = 1
+critic_target_period = 80
+eps = 2.84e-8
+gamma = 0.860
+tau = 5.20e-2
+train_steps = 20
+
+[overrides.matrix-matrix] # https://wandb.ai/lsy-tum/rot%7Ctd3_sweep/sweeps/mqkfpida?nw=nwuseramacati
+actor_lr = 1.01e-4
+actor_period = 1
+actor_target_period = 10
+batch_size = 2048
+critic_lr = 5.87e-3
+critic_period = 1
+critic_target_period = 40
+eps = 8.14e-8
+gamma = 0.957
+tau = 0.035
+train_steps = 20

@@ -1,0 +1,243 @@
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).parents[1]))
+
+import numpy as np
+import pytest
+import robosuite as suite
+from scipy.spatial.transform import Rotation as R
+from utils.utils import RotationGymWrapper, load_manipulator_controller_config
+
+from rotations.envs.actions import euler_scale
+from rotations.rotations import RotType
+
+
+@pytest.mark.unit
+@pytest.mark.filterwarnings("ignore:.*Box")
+def test_rel_actions() -> None:
+    horizon = 500
+    obs_type = "matrix"
+    control_mode = "rel"
+    step_len = 0.1
+
+    # Load fixed controller config
+    controller_config = load_manipulator_controller_config(keep_rot_scale=False)
+
+    # Sample fixed rotation actions for half of the env's horizon
+    # Rotations must be small to avoid joint limits or singular configurations
+    rvec = (r := np.array([0.1, 0.4, -0.2])) / np.linalg.norm(r)
+    rots = R.from_rotvec(np.tile(rvec, (horizon // 2, 1)) * 0.01)
+    
+    # Loop over all supported relative action types
+    action_types = ["tangent", "euler", "quat", "matrix"]
+    for action_type in action_types:
+        print(f"Testing action type: {action_type}")
+
+        # Create and wrap test environment
+        env = suite.make(
+            "Lift",
+            controller_configs=controller_config, 
+            robots=["Panda"], 
+            gripper_types="default", 
+            use_camera_obs=False,
+            use_object_obs=True,
+            reward_scale=1.0,
+            reward_shaping=True,
+            has_renderer=True,
+            has_offscreen_renderer=False,
+            control_freq=20,
+            horizon=horizon,
+            ignore_done=False,
+            hard_reset=False,
+        )
+        env = RotationGymWrapper(env, action_type, obs_type, step_len, control_mode)
+        
+        # Record starting orientation of robot
+        env.reset()
+        ori_init = env._get_observations()["robot0_eef_quat_site"]
+
+        # Simulate first half of episode using sampled actions
+        pos_gri = np.full((len(rots), 4), 0.05)
+        pos, gri = pos_gri[:, :3], pos_gri[:, 3:]
+        action_type = RotType(action_type)
+        for p, r, g in zip(pos, rots, gri):
+            o = action_type.as_array(r)
+            action = np.concatenate([p, o, g])
+            env.step(action)
+        
+        # Attempt to reverse all actions by passing the inverted rotations through the wrapper 
+        # The transformation carried out by the wrapper should perserve the relation between 
+        # input and output rotations such that: if wrapper(r_inv) = wrapper(r).inv 
+        # allowing us to reach initial orientation again
+        for p, r, g in zip(reversed(pos), reversed(rots), reversed(gri)):
+            o = action_type.as_array(r.inv())
+            action = np.concatenate([-p, o, -g])
+            env.step(action)
+        
+        # Record final orientation of the robot
+        ori_final = env._get_observations()["robot0_eef_quat_site"]
+        env.close()
+
+        # Evaluate the proximity of the initial and final orientations to each other
+        rel_ori = R.from_quat(ori_init).inv() * R.from_quat(ori_final)
+        assert rel_ori.magnitude() < 0.1
+
+
+@pytest.mark.unit
+@pytest.mark.filterwarnings("ignore:.*Box")
+def test_rel_scale_actions() -> None:
+    horizon = 500
+    obs_type = "matrix"
+    control_mode = "rel_scale"
+    step_len = 0.1
+
+    # Load fixed controller config
+    controller_config = load_manipulator_controller_config(keep_rot_scale=False)
+
+    # Sample fixed rotation actions for half of the env's horizon
+    # Rotations must be small to avoid joint limits or singular configurations
+    rvec = (r := np.array([0.1, 0.4, -0.2])) / np.linalg.norm(r)
+    rots = R.from_rotvec(np.tile(rvec, (horizon // 2, 1)) * 0.01)
+    
+    # Loop over all supported relative scaled action types
+    action_types = ["tangent", "euler"]
+    for action_type in action_types:
+        print(f"Testing action type: {action_type}")
+
+        # Create and wrap test environment
+        env = suite.make(
+            "Lift",
+            controller_configs=controller_config, 
+            robots=["Panda"], 
+            gripper_types="default", 
+            use_camera_obs=False,
+            use_object_obs=True,
+            reward_scale=1.0,
+            reward_shaping=True,
+            has_renderer=True,
+            has_offscreen_renderer=False,
+            control_freq=20,
+            horizon=horizon,
+            ignore_done=False,
+            hard_reset=False,
+        )
+        env = RotationGymWrapper(env, action_type, obs_type, step_len, control_mode)
+        
+        # Record starting orientation of robot
+        env.reset()
+        ori_init = env._get_observations()["robot0_eef_quat_site"]
+
+        # Simulate first half of episode using sampled actions
+        pos_gri = np.full((len(rots), 4), 0.05)
+        pos, gri = pos_gri[:, :3], pos_gri[:, 3:]
+        action_type = RotType(action_type)
+        for p, r, g in zip(pos, rots, gri):
+            o = action_type.as_array(r)
+            o = o / (np.sqrt(3) * step_len) if action_type == RotType.tangent \
+                else o / euler_scale[step_len]
+            action = np.concatenate([p, o, g])
+            env.step(action)
+        
+        # Attempt to reverse all actions by passing the inverted rotations through the wrapper 
+        # The transformation carried out by the wrapper should perserve the relation between 
+        # input and output rotations such that: if wrapper(r_inv) = wrapper(r).inv 
+        # allowing us to reach initial orientation again
+        for p, r, g in zip(reversed(pos), reversed(rots), reversed(gri)):
+            o = action_type.as_array(r.inv())
+            o = o / (np.sqrt(3) * step_len) if action_type == RotType.tangent \
+                else o / euler_scale[step_len]
+            action = np.concatenate([-p, o, -g])
+            env.step(action)
+        
+        # Record final orientation of the robot
+        ori_final = env._get_observations()["robot0_eef_quat_site"]
+        env.close()
+
+        # Evaluate the proximity of the initial and final orientations to each other
+        rel_ori = R.from_quat(ori_init).inv() * R.from_quat(ori_final)
+        assert rel_ori.magnitude() < 0.1
+
+
+@pytest.mark.unit
+@pytest.mark.filterwarnings("ignore:.*Box")
+def test_abs_actions() -> None:
+    horizon = 750
+    obs_type = "matrix"
+    control_mode = "abs"
+    step_len = 0.1
+
+    # Load fixed controller config
+    controller_config = load_manipulator_controller_config(keep_rot_scale=False)
+
+    # Sample fixed rotation actions for a third of the env's horizon
+    # Rotations must be small to avoid joint limits or singular configurations
+    # Note: Multipying a rvec * n is equivalent to aggregating rvec by itself n times
+    rvec = (r := np.array([0.1, 0.4, -0.2])) / np.linalg.norm(r)
+    rots = R.from_rotvec(rvec[None, :] * 0.005 * np.arange(horizon // 3)[:, None])
+
+    # Loop over all supported relative action types
+    action_types = ["tangent", "euler", "quat", "matrix"]
+    for action_type in action_types:
+        print(f"Testing action type: {action_type}")
+
+        # Create and wrap test environment
+        env = suite.make(
+            "Lift",
+            controller_configs=controller_config, 
+            robots=["Panda"],
+            gripper_types="default",
+            use_camera_obs=False,
+            use_object_obs=True,
+            reward_scale=1.0,
+            reward_shaping=True,
+            has_renderer=True,
+            has_offscreen_renderer=False,
+            control_freq=20,
+            horizon=horizon,
+            ignore_done=False,
+            hard_reset=False,
+        )
+        env = RotationGymWrapper(env, action_type, obs_type, step_len, control_mode)
+        
+        # Record starting orientation of robot
+        env.reset()
+        ori_init = env._get_observations()["robot0_eef_quat_site"]
+        
+        # Make absolute rotations relative to the starting EEF orientation 
+        ori_base_init = R.from_matrix(env.osc_r1.goal_origin_to_eef_pose()[:3, :3])
+        rots_base = ori_base_init * rots
+
+        # Simulate first third of episode using sampled actions
+        pos_gri = np.full((len(rots_base), 4), 0.05)
+        pos, gri = pos_gri[:, :3], pos_gri[:, 3:]
+        action_type = RotType(action_type)
+        for p, r, g in zip(pos, rots_base, gri, strict=True):
+            o = action_type.as_array(r) 
+            o = o / np.sqrt(3) if action_type == RotType.tangent else o
+            action = np.concatenate([p, o, g])
+            env.step(action)
+        
+        # Simulate second third of episode, where we try to remain in place.
+        # If the action transformation and IKs work correctly, we should reach 
+        # the final orientation quickly (or be already at it), then remain stationary.
+        p, g = np.zeros(3), np.full(1, -0.05) # Open gripper as a visual indicator
+        for _ in range(horizon // 3):
+            action = np.concatenate([p, o, g])
+            env.step(action)
+
+        # Attempt to reverse all actions using wrapper's methods to reach initial orientation
+        # If the transformation is correct, we should be able to go back successfully
+        for p, r, g in zip(reversed(pos), reversed(rots_base), reversed(gri)):
+            o = action_type.as_array(r)
+            o = o / np.sqrt(3) if action_type == RotType.tangent else o
+            action = np.concatenate([-p, o, g])
+            env.step(action)
+        
+        # Record final orientation of the robot
+        ori_final = env._get_observations()["robot0_eef_quat_site"]
+        env.close()
+
+        # Evaluate the proximity of the initial and final orientations to each other
+        rel_ori = R.from_quat(ori_init).inv() * R.from_quat(ori_final)
+        assert rel_ori.magnitude() < 0.1

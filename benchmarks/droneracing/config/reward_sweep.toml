@@ -1,0 +1,13 @@
+program = "benchmarks/droneracing/ppo_sweep.py"
+method = "bayes"
+
+[metric]
+name = "eval/mean_target_gate"
+goal = "maximize"
+
+[parameters]
+crash_weight = { min = -30.0, max = -2.5 }
+vel_weight = { min = -2.5, max = -0.1 }
+finished_weight = { min = 10.0, max = 30.0 }
+# Negative sign for action_weight is applied internally from the sweep program 
+action_weight = { distribution = "log_uniform_values", min = 1e-5, max = 1e-2 }

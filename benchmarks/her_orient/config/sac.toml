@@ -1,0 +1,175 @@
+[wandb]
+project = "rot|sac_robosuite"
+group = ""
+entity = "lsy-tum"
+
+[env]
+name = "Lift"
+n_envs = 8
+[env.kwargs]
+robots = ["Panda"]
+gripper_types = "default"
+use_camera_obs = false
+use_object_obs = true
+reward_scale = 1.0
+reward_shaping = true
+has_renderer = false
+has_offscreen_renderer = false
+control_freq = 20
+horizon = 500
+ignore_done = false
+hard_reset = false
+
+[env.wrapper.kwargs]
+action_type = "tangent"
+obs_type = "matrix"
+control_mode = "rel"
+
+[sac]
+# General params
+device = "cpu" # Envs run on CPU
+# Rollout params
+n_steps = 5_000_000
+# Training params
+actor_lr = 0.001
+critic_lr = 0.0005
+buffer_size = 1_000_000
+train_period = 2_500
+train_steps = 1_000
+actor_period = 1
+critic_period = 1
+target_period = 5
+tau = 0.005
+gamma = 0.99
+grad_clip = 2.5
+batch_size = 128
+alpha = 0.2
+autotune_alpha = true
+alpha_lr = 0.001
+learning_starts = 3300
+# Eval params
+eval_period = 2_500
+eval_steps = 4_000  # Deviation from benchmark (2_500)
+# Checkpoint params
+checkpoint_path = "saves/robosuite/sac"
+checkpoint_buffer = false
+# checkpoint_period = 1_280 
+# overwrite_policy = false
+# Action transform
+[[sac.action_tf]]
+type = "IdentityTF"
+
+[overrides]
+
+# All values are derived from relative actions
+[overrides.tangent-matrix-sparse] # https://wandb.ai/lsy-tum/rot%7Csac_sweep/runs/rkk15cr9?nw=nwuseru1999168
+actor_lr = 1.30e-4
+actor_period = 1
+alpha = 2.40e-1
+alpha_lr = 4.51e-2
+batch_size = 2048
+critic_lr = 1.34e-3
+critic_period = 1
+eps = 4.01e-8
+gamma = 9.6e-1
+target_period = 40
+tau = 3.89e-3
+train_steps = 20
+
+[overrides.tangent-matrix-dense] # https://wandb.ai/lsy-tum/rot|sac_sweep/runs/kc26crw6?nw=nwuseru1999168
+actor_lr = 2.24e-3
+actor_period = 1
+alpha = 4.50e-2
+alpha_lr = 2.86e-2
+batch_size = 8192
+critic_lr = 9.42e-4
+critic_period = 1
+eps = 6.34e-7
+gamma = 9.75e-1
+target_period = 40
+tau = 8.76e-3
+train_steps = 20
+
+[overrides.euler-matrix-sparse] # https://wandb.ai/lsy-tum/rot%7Csac_sweep/runs/4ce8s5kj?nw=nwuseru1999168
+actor_lr = 4.54e-3
+actor_period = 1
+alpha = 0.926
+alpha_lr = 3.60e-2
+batch_size = 4096
+critic_lr = 1.62e-3
+critic_period = 1
+eps = 1.67e-6
+gamma = 0.897
+target_period = 80
+tau = 7.73e-3
+train_steps = 20
+
+[overrides.euler-matrix-dense] # https://wandb.ai/lsy-tum/rot|sac_sweep/runs/rrk0pygo?nw=nwuseru1999168
+actor_lr = 2.33e-3
+actor_period = 2
+alpha = 0.495
+alpha_lr = 5.76e-2
+batch_size = 2048
+critic_lr = 8.97e-3
+critic_period = 1
+eps = 3.22e-7
+gamma = 0.926
+target_period = 10
+tau = 1.71e-3
+train_steps = 20
+
+[overrides.quat-matrix-sparse] # https://wandb.ai/lsy-tum/rot%7Csac_sweep/runs/tczpu1sj?nw=nwuseru1999168
+actor_lr = 5.74e-3
+actor_period = 1
+alpha = 5.64e-1
+alpha_lr = 1.20e-2
+batch_size = 2048
+critic_lr = 4.94e-4
+critic_period = 1
+eps = 2.64e-5
+gamma = 8.07e-1
+target_period = 20
+tau = 3.44e-3
+train_steps = 20
+
+[overrides.quat-matrix-dense] # https://wandb.ai/lsy-tum/rot|sac_sweep/runs/7br642f5?nw=nwuseru1999168
+actor_lr = 6.52e-3
+actor_period = 1
+alpha = 6.06e-1
+alpha_lr = 3.30e-2
+batch_size = 2048
+critic_lr = 2.91e-3
+critic_period = 2
+eps = 5.88e-8
+gamma = 8.16e-1
+target_period = 10
+tau = 1.19e-3
+train_steps = 20
+
+[overrides.matrix-matrix-sparse] # https://wandb.ai/lsy-tum/rot%7Csac_sweep/runs/bmlb2vdu?nw=nwuseru1999168
+actor_lr = 2.32e-3
+actor_period = 2
+alpha = 0.883
+alpha_lr = 1.76e-2
+batch_size = 8192
+critic_lr = 4.43e-4
+critic_period = 1
+eps = 1.44e-7
+gamma = 0.885
+target_period = 20
+tau = 4.51e-3
+train_steps = 20
+
+[overrides.matrix-matrix-dense] # https://wandb.ai/lsy-tum/rot|sac_sweep/runs/fltdn7p6?nw=nwuseru1999168
+actor_lr = 9.22e-3
+actor_period = 1
+alpha = 0.995
+alpha_lr = 3.20e-2
+batch_size = 4096
+critic_lr = 6.33e-3
+critic_period = 1
+eps = 2.69e-6
+gamma = 0.901
+target_period = 80
+tau = 2.03e-3
+train_steps = 20

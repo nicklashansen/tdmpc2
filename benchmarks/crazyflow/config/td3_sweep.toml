@@ -1,0 +1,19 @@
+program = "benchmarks/crazyflow/td3_sweep.py"
+method = "bayes"
+
+[metric]
+name = "eval/mean_reward"
+goal = "maximize"
+
+[parameters]
+
+actor_lr = { distribution = "log_uniform_values", min = 0.0001, max = 0.01 }
+critic_lr = { distribution = "log_uniform_values", min = 0.0001, max = 0.01 }
+train_steps = { values = [256, 512, 1024] }
+actor_period = { values = [1, 2, 4, 8] }
+critic_period = { values = [1, 2, 4, 8] }
+actor_target_period = { values = [10, 20, 40, 80] }
+critic_target_period = { values = [10, 20, 40, 80] }
+tau = { distribution = "uniform", min = 0.001, max = 0.1 }
+gamma = { distribution = "uniform", min = 0.8, max = 0.99 }
+batch_size = { values = [1024, 2048, 4096] }

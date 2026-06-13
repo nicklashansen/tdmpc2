@@ -1,0 +1,70 @@
+[wandb]
+project = "rot|ppo_robosuite"
+group = ""
+entity = "lsy-tum"
+
+[env]
+name = "Lift"
+n_envs = 8
+actor_class = "manipulator"
+[env.kwargs]
+robots = ["Panda"]
+gripper_types = "default"
+use_camera_obs = false
+use_object_obs = true
+reward_scale = 1.0
+reward_shaping = true
+has_renderer = false
+has_offscreen_renderer = false
+control_freq = 20
+horizon = 500
+ignore_done = false
+hard_reset = false
+
+[env.wrapper.kwargs]
+action_type = "tangent"
+obs_type = "matrix"
+control_mode = "rel"
+
+[ppo]
+n_steps = 100            # period = 800
+n_minibatches = 4        # batch_size = 200
+n_total_steps = 5_000_000
+actor_lr = 0.001
+critic_lr = 0.001
+n_epochs = 10
+
+eval_period = 20_000     # Deviation from benchmark (2_500)
+n_eval_steps = 8_000    # Deviation from benchmark (2_500)
+# checkpoint_period = 4_000 
+# overwrite_policy = false
+
+clip_coef = 0.2
+ent_coef = 0.01
+vf_coef = 0.5
+max_grad_norm = 1.0
+target_kl = -1      # Toml doesn't support None
+gamma = 0.99
+norm_adv = true
+clip_vloss = true
+gae_lambda = 0.95
+device = "cuda"
+use_logstd_net = false
+
+# Environment-specific overrides
+[overrides.Wipe]
+actor_class = "pose"
+gripper_types = "WipingGripper"
+
+[overrides.TwoArmLift]
+actor_class = "dual_manipulator"
+robots = ["Panda", "Panda"]
+
+[overrides.TwoArmHandover]
+actor_class = "dual_manipulator"
+robots = ["Panda", "Panda"]
+
+[overrides.TwoArmPegInHole]
+actor_class = "dual_pose"
+robots = ["Panda", "Panda"]
+gripper_types = "none"

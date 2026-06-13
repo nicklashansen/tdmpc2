@@ -1,0 +1,143 @@
+[wandb]
+project = "rot|ppo_quadrotors"
+group = ""
+entity = "lsy-tum"
+
+[env]
+name = "DroneFigureEightTrajectory-v0"
+n_envs = 1024
+n_eval_envs = 64
+
+[env.kwargs]
+n_samples = 10
+trajectory_time = 10.0
+physics = "analytical"
+freq = 50
+device = "gpu"
+
+[env.wrapper.kwargs]
+action_type = "tangent"
+obs_type = "matrix"
+control_mode = "rel"
+
+[ppo]
+n_steps = 16                # period = 16_384
+n_minibatches = 16          # batch_size = 1024
+n_total_steps = 1_000_000
+actor_lr = 0.001
+critic_lr = 0.001
+n_epochs = 15
+
+eval_period = 32_768     # 1024 * 16 * 2
+n_eval_steps = 32_000    # 64 * 500
+# checkpoint_period = 4_000 
+# overwrite_policy = false
+
+clip_coef = 0.275
+ent_coef = 0.018
+vf_coef = 0.5
+max_grad_norm = 1.5
+target_kl = -1      # Toml doesn't support None
+gamma = 0.9
+norm_adv = true
+clip_vloss = true
+gae_lambda = 0.95
+device = "cuda"
+use_logstd_net = false
+
+[overrides]
+[overrides.tangent-matrix]  # https://wandb.ai/lsy-tum/rot|ppo_sweep/runs/wur9kask?nw=nwuseru1999168
+actor_lr = 5.02e-4
+clip_coef = 0.272
+critic_lr = 3.66e-3
+ent_coef = 1.65e-4
+gae_lambda = 0.886
+gamma = 0.959
+max_grad_norm = 1.52
+n_epochs = 5
+n_minibatches = 16
+n_steps = 8
+
+[overrides.euler-matrix]    # https://wandb.ai/lsy-tum/rot|ppo_sweep/runs/ldcmist5?nw=nwuseru1999168
+actor_lr = 8.57e-4
+clip_coef = 0.239
+critic_lr = 5.63e-4
+ent_coef = 3.89e-2
+gae_lambda = 0.821
+gamma = 0.971
+max_grad_norm = 1.79
+n_epochs = 15
+n_minibatches = 32
+n_steps = 8
+
+[overrides.matrix-matrix]   # https://wandb.ai/lsy-tum/rot|ppo_sweep/runs/uow49zau?nw=nwuseru1999168
+actor_lr = 2.66e-3
+clip_coef = 0.160
+critic_lr = 1.53e-3
+ent_coef = 5.45e-3
+gae_lambda = 0.926
+gamma = 0.847
+max_grad_norm = 1.18
+n_epochs = 15
+n_minibatches = 32
+n_steps = 8
+
+[overrides.matrix-matrix-offset]  # https://wandb.ai/lsy-tum/rot|ppo_sweep/runs/6zov969g?nw=nwuseru1999168
+actor_lr = 4.812e-4
+clip_coef = 0.277
+critic_lr = 4.491e-4
+ent_coef = 2.033e-2
+gae_lambda = 0.960
+gamma = 0.977
+max_grad_norm = 1.229
+n_epochs = 5
+n_minibatches = 32
+n_steps = 8
+
+[overrides.quat-matrix]     # https://wandb.ai/lsy-tum/rot|ppo_sweep/runs/h1kwln7f?nw=nwuseru1999168
+actor_lr = 1.22e-3
+clip_coef = 0.145
+critic_lr = 2.46e-3
+ent_coef = 3.05e-2
+gae_lambda = 0.874
+gamma = 0.913
+max_grad_norm = 1.62
+n_epochs = 20
+n_minibatches = 8
+n_steps = 8
+
+[overrides.quat-matrix-offset]  # https://wandb.ai/lsy-tum/rot|ppo_sweep/runs/7lxniwx2?nw=nwuseru1999168
+actor_lr = 1.174e-4
+clip_coef = 0.257
+critic_lr = 4.770e-4
+ent_coef = 8.680e-4
+gae_lambda = 0.833
+gamma = 0.945
+max_grad_norm = 0.501
+n_epochs = 10
+n_minibatches = 32
+n_steps = 8
+
+[overrides.r6-matrix]  # https://wandb.ai/lsy-tum/rot|ppo_sweep/runs/ruxgxkkg?nw=nwuseru1999168
+actor_lr = 1.861e-3
+clip_coef = 0.267
+critic_lr = 2.425e-4
+ent_coef = 1.917e-2
+gae_lambda = 0.926
+gamma = 0.953
+max_grad_norm = 1.268
+n_epochs = 20
+n_minibatches = 32
+n_steps = 8
+
+[overrides.r6-matrix-offset]  # https://wandb.ai/lsy-tum/rot|ppo_sweep/runs/fmsdzghq?nw=nwuseru1999168
+actor_lr = 1.705e-3
+clip_coef = 0.160
+critic_lr = 3.867e-4
+ent_coef = 2.094e-5
+gae_lambda = 0.911
+gamma = 0.943
+max_grad_norm = 1.089
+n_epochs = 20
+n_minibatches = 32
+n_steps = 8

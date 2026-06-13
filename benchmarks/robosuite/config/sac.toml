@@ -1,0 +1,80 @@
+[wandb]
+project = "rot|sac_robosuite"
+group = ""
+entity = "lsy-tum"
+
+[env]
+name = "Lift"
+n_envs = 8
+actor_class = "manipulator"
+[env.kwargs]
+robots = ["Panda"]
+gripper_types = "default"
+use_camera_obs = false
+use_object_obs = true
+reward_scale = 1.0
+reward_shaping = true
+has_renderer = false
+has_offscreen_renderer = false
+control_freq = 20
+horizon = 500
+ignore_done = false
+hard_reset = false
+
+[env.wrapper.kwargs]
+action_type = "tangent"
+obs_type = "matrix"
+control_mode = "rel"
+
+[sac]
+# General params
+device = "cuda"
+# Rollout params
+n_steps = 5_000_000
+# Training params
+actor_lr = 0.001
+critic_lr = 0.0005
+buffer_size = 1_000_000
+eps = 6e-7                 # AdamW epsilon
+train_period = 2_500
+train_steps = 1_000
+actor_period = 1
+critic_period = 1
+target_period = 10
+tau = 0.005
+gamma = 0.99
+grad_clip = 2.5
+batch_size = 128
+alpha = 0.2
+autotune_alpha = true
+alpha_lr = 0.001
+learning_starts = 3300
+# Eval params
+eval_period = 20_000
+eval_steps = 8_000      # Deviation from benchmark (2_500)
+# Checkpoint params
+checkpoint_path = "saves/robosuite/sac"
+checkpoint_buffer = false
+# checkpoint_period = 1_280 
+# overwrite_policy = false
+# Action transform
+[[sac.action_tf]]
+type = "IdentityTF"
+
+# Environment-specific overrides
+[overrides.Wipe]
+actor_class = "pose"
+gripper_types = "WipingGripper"
+
+[overrides.TwoArmLift]
+actor_class = "dual_manipulator"
+robots = ["Panda", "Panda"]
+
+[overrides.TwoArmHandover]
+actor_class = "dual_manipulator"
+robots = ["Panda", "Panda"]
+
+[overrides.TwoArmPegInHole]
+actor_class = "dual_pose"
+robots = ["Panda", "Panda"]
+gripper_types = "none"

@@ -1,0 +1,78 @@
+<mujocoinclude>
+  <compiler angle="radian" meshdir="assets"/>
+
+  <option integrator="implicitfast"/>
+
+  <default>
+    <default class="fr3">
+      <joint armature="0.1" damping="1"/>
+      <position inheritrange="1"/>
+      <default class="finger">
+        <joint axis="0 1 0" type="slide" armature="100" damping="1000" limited="true" solimplimit="0.99 0.999 0.01" solreflimit="0.01 1" range="0 0.05"/>
+      </default>      
+      <default class="visual">
+        <geom type="mesh" group="2" contype="0" conaffinity="0"/>
+      </default>
+      <default class="box_collision">
+        <geom type="box" group="3" mass="0" density="0" condim="4" margin="0.001" friction="1.5 0.05 0.01" solimp="0.95 0.99 0.001" solref="0.004 1"/>
+      </default>
+      <site size="0.001" rgba="0.5 0.5 0.5 0.3" group="4"/>
+    </default>
+  </default>
+
+  <asset>
+    <material name="black" rgba=".2 .2 .2 1"/>
+    <material name="white" rgba="1 1 1 1"/>
+    <material name="red" rgba="1 0.072272 0.039546 1"/>
+    <material name="gray" rgba="0.863156 0.863156 0.863157 1"/>
+    <material name="button_green" rgba="0.102241 0.571125 0.102242 1"/>
+    <material name="button_red" rgba="0.520996 0.008023 0.013702 1"/>
+    <material name="button_blue" rgba="0.024157 0.445201 0.737911 1"/>
+
+    <mesh file="assets/link0_0.obj"/>
+    <mesh file="assets/link0_1.obj"/>
+    <mesh file="assets/link0_2.obj"/>
+    <mesh file="assets/link0_3.obj"/>
+    <mesh file="assets/link0_4.obj"/>
+    <mesh file="assets/link0_5.obj"/>
+    <mesh file="assets/link0_6.obj"/>
+    <mesh file="assets/link1.obj"/>
+    <mesh file="assets/link2.obj"/>
+    <mesh file="assets/link3_0.obj"/>
+    <mesh file="assets/link3_1.obj"/>
+    <mesh file="assets/link4_0.obj"/>
+    <mesh file="assets/link4_1.obj"/>
+    <mesh file="assets/link5_0.obj"/>
+    <mesh file="assets/link5_1.obj"/>
+    <mesh file="assets/link5_2.obj"/>
+    <mesh file="assets/link6_0.obj"/>
+    <mesh file="assets/link6_1.obj"/>
+    <mesh file="assets/link6_2.obj"/>
+    <mesh file="assets/link6_3.obj"/>
+    <mesh file="assets/link6_4.obj"/>
+    <mesh file="assets/link6_5.obj"/>
+    <mesh file="assets/link6_6.obj"/>
+    <mesh file="assets/link6_7.obj"/>
+    <mesh file="assets/link7_0.obj"/>
+    <mesh file="assets/link7_1.obj"/>
+    <mesh file="assets/link7_2.obj"/>
+    <mesh file="assets/link7_3.obj"/>
+    <mesh file="assets/hand_0.obj"/>
+    <mesh file="assets/hand_1.obj"/>
+    <mesh file="assets/hand_2.obj"/>
+    <mesh file="assets/hand_3.obj"/>
+    <mesh file="assets/hand_4.obj"/>
+    <mesh file="assets/finger_0.obj"/>
+    <mesh file="assets/finger_1.obj"/>
+
+    <mesh name="link0_coll" file="assets/link0.stl"/>
+    <mesh name="link1_coll" file="assets/link1.stl"/>
+    <mesh name="link2_coll" file="assets/link2.stl"/>
+    <mesh name="link3_coll" file="assets/link3.stl"/>
+    <mesh name="link4_coll" file="assets/link4.stl"/>
+    <mesh name="link5_coll" file="assets/link5.stl"/>
+    <mesh name="link6_coll" file="assets/link6.stl"/>
+    <mesh name="link7_coll" file="assets/link7.stl"/>
+    <mesh name="hand_c" file="assets/hand.stl"/>
+  </asset>
+</mujocoinclude>

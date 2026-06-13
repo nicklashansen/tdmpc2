@@ -1,0 +1,73 @@
+[wandb]
+project = "rot|td3_her"
+group = ""
+entity = "lsy-tum"
+
+[env]
+name = "FetchPickAndPlace-v4"
+n_envs = 32
+[env.kwargs]
+# render_mode = "human"
+
+[td3]
+# General params
+device = "cuda" # Envs run on GPU
+# Rollout params
+n_steps = 4_000_000
+# Training params
+actor_lr = 0.001
+critic_lr = 0.001
+buffer_size = 4_000_000
+train_period = 1_600
+train_steps = 40
+actor_period = 1
+critic_period = 1
+actor_target_period = 40
+critic_target_period = 40
+tau = 0.05
+gamma = 0.98
+grad_clip = 5.0
+batch_size = 4096
+reward_clip = [-50.0, 0.0] # Should we use this?
+# Eval params
+eval_period = 25_600
+eval_steps = 6_400
+# Checkpoint params
+checkpoint_path = "saves/her/td3_fetch_pnp"
+checkpoint_buffer = false
+
+# Action transform -> Uniform Noise with probability 0.3 and clipping to [-1.0, 1.0]
+[[td3.action_tf]]
+type = "ChoiceTF"
+[td3.action_tf.kwargs]
+prob = [0.7, 0.3]
+[[td3.action_tf.kwargs.transforms]]
+type = "AdditiveNoiseTF"
+[td3.action_tf.kwargs.transforms.kwargs.noise]
+type = "NormalNoise"
+[td3.action_tf.kwargs.transforms.kwargs.noise.kwargs]
+mean = 0.0
+std = 0.2
+[[td3.action_tf.kwargs.transforms]]
+type = "ReplaceWithNoiseTF"
+[td3.action_tf.kwargs.transforms.kwargs.noise]
+type = "UniformNoise"
+[td3.action_tf.kwargs.transforms.kwargs.noise.kwargs]
+min = -1.0
+max = 1.0
+[[td3.action_tf]]
+type = "ClipTF"
+[td3.action_tf.kwargs]
+min = -1.0
+max = 1.0
+# Observation transform: NormalizeObservation
+[[td3.obs_tf]]
+type = "TensorDictNormTF"
+# Target action transform: Gaussian noise with mean 0.0 and std 0.1
+[[td3.target_action_tf]]
+type = "AdditiveNoiseTF"
+[td3.target_action_tf.kwargs.noise]
+type = "NormalNoise"
+[td3.target_action_tf.kwargs.noise.kwargs]
+mean = 0.0
+std = 0.1
