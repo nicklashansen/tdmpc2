@@ -5,7 +5,6 @@ from common import math
 from common.scale import RunningScale
 from common.world_model import WorldModel
 from common.layers import api_model_conversion
-from tensordict import TensorDict
 
 
 class TDMPC2(torch.nn.Module):
@@ -230,13 +229,13 @@ class TDMPC2(torch.nn.Module):
 		self.pi_optim.step()
 		self.pi_optim.zero_grad(set_to_none=True)
 
-		info = TensorDict({
+		info = {
 			"pi_loss": pi_loss,
 			"pi_grad_norm": pi_grad_norm,
 			"pi_entropy": info["entropy"],
 			"pi_scaled_entropy": info["scaled_entropy"],
 			"pi_scale": self.scale.value,
-		})
+		}
 		return info
 
 	@torch.no_grad()
@@ -318,18 +317,19 @@ class TDMPC2(torch.nn.Module):
 
 		# Return training statistics
 		self.model.eval()
-		info = TensorDict({
+		info = {
 			"consistency_loss": consistency_loss,
 			"reward_loss": reward_loss,
 			"value_loss": value_loss,
 			"termination_loss": termination_loss,
 			"total_loss": total_loss,
 			"grad_norm": grad_norm,
-		})
+		}
 		if self.cfg.episodic:
 			info.update(math.termination_statistics(torch.sigmoid(termination_pred[-1]), terminated[-1]))
 		info.update(pi_info)
-		return info.detach().mean()
+		return {k: v.detach().mean() if isinstance(v, torch.Tensor) else torch.tensor(v) \
+			for k, v in info.items()}
 
 	def update(self, buffer):
 		"""
