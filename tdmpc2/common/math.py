@@ -3,9 +3,11 @@ import torch.nn.functional as F
 
 
 def soft_ce(pred, target, cfg):
-	"""Computes the cross entropy loss between predictions and soft targets."""
-	pred = F.log_softmax(pred, dim=-1)
+	"""Computes scalar or distributional reward/value regression loss."""
 	target = two_hot(target, cfg)
+	if cfg.num_bins <= 1:
+		return F.mse_loss(pred, target, reduction='none')
+	pred = F.log_softmax(pred, dim=-1)
 	return -(target * pred).sum(-1, keepdim=True)
 
 
