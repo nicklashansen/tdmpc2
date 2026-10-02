@@ -38,7 +38,8 @@ class WorldModel(nn.Module):
 	def init(self):
 		# Create params
 		self._detach_Qs_params = TensorDictParams(self._Qs.params.data, no_convert=True)
-		self._target_Qs_params = TensorDictParams(self._Qs.params.data.clone(), no_convert=True)
+		if not hasattr(self, "_target_Qs_params"):
+			self._target_Qs_params = TensorDictParams(self._Qs.params.data.clone(), no_convert=True)
 
 		# Create modules
 		with self._detach_Qs_params.data.to("meta").to_module(self._Qs.module):
@@ -51,6 +52,7 @@ class WorldModel(nn.Module):
 		self._detach_Qs.__dict__["params"] = self._detach_Qs_params
 		delattr(self._target_Qs, "params")
 		self._target_Qs.__dict__["params"] = self._target_Qs_params
+		self._target_Qs.train(False)
 
 	def __repr__(self):
 		repr = 'TD-MPC2 World Model\n'
