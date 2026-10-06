@@ -163,23 +163,25 @@ class WorldModel(nn.Module):
 		else: # No masking
 			action_dims = None
 
-		log_prob = math.gaussian_logprob(eps, log_std)
+		gaussian_log_prob = math.gaussian_logprob(eps, log_std)
 
-		# Scale log probability by action dimensions
+		# Preserve the original Gaussian scaling: one normalization constant
+		# is subtracted before multiplying by the number of active dimensions.
 		size = eps.shape[-1] if action_dims is None else action_dims
-		scaled_log_prob = log_prob * size
+		scaled_log_prob = (gaussian_log_prob + (eps.shape[-1] - 1) * 0.9189385175704956) * size
 
 		# Reparameterization trick
 		action = mean + eps * log_std.exp()
-		mean, action, log_prob = math.squash(mean, action, log_prob)
+		mean, action, log_prob = math.squash(mean, action, gaussian_log_prob)
+		# Apply the squash Jacobian once, as in the original policy objective.
+		scaled_log_prob = scaled_log_prob + log_prob - gaussian_log_prob
 
-		entropy_scale = scaled_log_prob / (log_prob + 1e-8)
 		info = TensorDict({
 			"mean": mean,
 			"log_std": log_std,
 			"action_prob": 1.,
 			"entropy": -log_prob,
-			"scaled_entropy": -log_prob * entropy_scale,
+			"scaled_entropy": -scaled_log_prob,
 		})
 		return action, info
 
