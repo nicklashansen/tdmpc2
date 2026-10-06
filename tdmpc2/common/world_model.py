@@ -94,10 +94,12 @@ class WorldModel(nn.Module):
 		if isinstance(task, int):
 			task = torch.tensor([task], device=x.device)
 		emb = self._task_emb(task.long())
+		if emb.ndim == 1:
+			emb = emb.unsqueeze(0)
+		if emb.shape[0] == 1:
+			emb = emb.repeat(x.shape[-2], 1)
 		if x.ndim == 3:
 			emb = emb.unsqueeze(0).repeat(x.shape[0], 1, 1)
-		elif emb.shape[0] == 1:
-			emb = emb.repeat(x.shape[0], 1)
 		return torch.cat([x, emb], dim=-1)
 
 	def encode(self, obs, task):
