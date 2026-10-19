@@ -1,5 +1,6 @@
 import torch
 from tensordict.tensordict import TensorDict
+from common import device as dev
 from torchrl.data.replay_buffers import ReplayBuffer, LazyTensorStorage
 from torchrl.data.replay_buffers.samplers import SliceSampler
 
@@ -7,12 +8,12 @@ from torchrl.data.replay_buffers.samplers import SliceSampler
 class Buffer():
 	"""
 	Replay buffer for TD-MPC2 training. Based on torchrl.
-	Uses CUDA memory if available, and CPU memory otherwise.
+	Uses accelerator (XPU or CUDA) memory if available, and CPU memory otherwise.
 	"""
 
 	def __init__(self, cfg):
 		self.cfg = cfg
-		self._device = torch.device('cuda:0')
+		self._device = dev.resolve_device(cfg.get('device', None))
 		self._capacity = min(cfg.buffer_size, cfg.steps)
 		self._sampler = SliceSampler(
 			num_slices=self.cfg.batch_size,
@@ -50,7 +51,7 @@ class Buffer():
 	def _init(self, tds):
 		"""Initialize the replay buffer. Use the first episode to estimate storage requirements."""
 		print(f'Buffer capacity: {self._capacity:,}')
-		mem_free, _ = torch.cuda.mem_get_info()
+		mem_free, _ = dev.mem_get_info(self._device)
 		bytes_per_step = sum([
 				(v.numel()*v.element_size() if not isinstance(v, TensorDict) \
 				else sum([x.numel()*x.element_size() for x in v.values()])) \
@@ -58,8 +59,8 @@ class Buffer():
 		]) / len(tds)
 		total_bytes = bytes_per_step*self._capacity
 		print(f'Storage required: {total_bytes/1e9:.2f} GB')
-		# Heuristic: decide whether to use CUDA or CPU memory
-		storage_device = 'cuda:0' if 2.5*total_bytes < mem_free else 'cpu'
+		# Heuristic: decide whether to use accelerator or CPU memory
+		storage_device = str(self._device) if 2.5*total_bytes < mem_free else 'cpu'
 		print(f'Using {storage_device.upper()} memory for storage.')
 		self._storage_device = torch.device(storage_device)
 		return self._reserve_buffer(

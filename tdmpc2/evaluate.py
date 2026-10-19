@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from termcolor import colored
 
+from common import device as dev
 from common.parser import parse_cfg
 from common.seed import set_seed
 from envs import make_env
@@ -39,7 +40,7 @@ def evaluate(cfg: dict):
 		$ python evaluate.py task=dog-run checkpoint=/path/to/dog-1.pt save_video=true
 	```
 	"""
-	assert torch.cuda.is_available()
+	assert dev.is_usable(cfg.get('device', None)), 'No XPU or CUDA device found; set device=cpu to run on the CPU.'
 	assert cfg.eval_episodes > 0, 'Must evaluate at least 1 episode.'
 	cfg = parse_cfg(cfg)
 	set_seed(cfg.seed)

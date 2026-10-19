@@ -69,6 +69,23 @@ wget https://www.tdmpc2.com/files/mjkey.txt -O ~/.mujoco/mjkey.txt
 
 Depending on your existing system packages, you may need to install other dependencies. See `docker/Dockerfile` for a list of recommended system packages.
 
+### How to run the same on Intel's XPU
+
+Skip the `torch==2.7.1` pin in `docker/environment.yaml` (it is the CUDA build) and install the XPU build of PyTorch instead, then the other dependencies as above:
+
+```
+pip install torch --index-url https://download.pytorch.org/whl/xpu
+```
+
+Training and evaluation pick the XPU automatically, then CUDA, then the CPU. The `device` argument selects one explicitly, with the same commands as above:
+
+```
+$ python evaluate.py task=dog-run checkpoint=/path/to/dog-1.pt device=xpu
+$ python train.py task=dog-run device=xpu:1
+```
+
+`torch.compile` uses its default mode on the XPU, because the `reduce-overhead` mode used on CUDA relies on CUDA graphs (a one-time warning says so). Set `compile=false` to run eagerly. To check a downloaded checkpoint against the CPU without a simulator, run `python tests/check_checkpoint_parity.py /path/to/dog-1.pt --device xpu`.
+
 ----
 
 ## Supported tasks

@@ -10,6 +10,7 @@ import torch
 import hydra
 from termcolor import colored
 
+from common import device as dev
 from common.parser import parse_cfg
 from common.seed import set_seed
 from common.buffer import Buffer
@@ -43,7 +44,7 @@ def train(cfg: dict):
 		$ python train.py task=dog-run steps=7000000
 	```
 	"""
-	assert torch.cuda.is_available()
+	assert dev.is_usable(cfg.get('device', None)), 'No XPU or CUDA device found; set device=cpu to run on the CPU.'
 	assert cfg.steps > 0, 'Must train for at least 1 step.'
 	cfg = parse_cfg(cfg)
 	set_seed(cfg.seed)

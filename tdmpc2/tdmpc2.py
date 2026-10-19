@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from common import math
+from common import device as dev, math
 from common.scale import RunningScale
 from common.world_model import WorldModel
 from common.layers import api_model_conversion
@@ -17,7 +17,7 @@ class TDMPC2(torch.nn.Module):
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
-		self.device = torch.device('cuda:0')
+		self.device = dev.resolve_device(cfg.get('device', None))
 		self.model = WorldModel(cfg).to(self.device)
 		self.optim = torch.optim.Adam([
 			{'params': self.model._encoder.parameters(), 'lr': self.cfg.lr*self.cfg.enc_lr_scale},
@@ -27,20 +27,20 @@ class TDMPC2(torch.nn.Module):
 			{'params': self.model._Qs.parameters()},
 			{'params': self.model._task_emb.parameters() if self.cfg.multitask else []
 			 }
-		], lr=self.cfg.lr, capturable=True)
-		self.pi_optim = torch.optim.Adam(self.model._pi.parameters(), lr=self.cfg.lr, eps=1e-5, capturable=True)
+		], lr=self.cfg.lr, capturable=self.device.type != 'cpu')
+		self.pi_optim = torch.optim.Adam(self.model._pi.parameters(), lr=self.cfg.lr, eps=1e-5, capturable=self.device.type != 'cpu')
 		self.model.eval()
 		self.scale = RunningScale(cfg)
 		self.cfg.iterations += 2*int(cfg.action_dim >= 20) # Heuristic for large action spaces
 		self.discount = torch.tensor(
-			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='cuda:0'
+			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device=self.device
 		) if self.cfg.multitask else self._get_discount(cfg.episode_length)
 		print('Episode length:', cfg.episode_length)
 		print('Discount factor:', self.discount)
 		self._prev_mean = torch.nn.Buffer(torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device))
 		if cfg.compile:
 			print('Compiling update function with torch.compile...')
-			self._update = torch.compile(self._update, mode="reduce-overhead")
+			self._update = torch.compile(self._update, mode=dev.compile_mode(self.device))
 
 	@property
 	def plan(self):
@@ -48,7 +48,7 @@ class TDMPC2(torch.nn.Module):
 		if _plan_val is not None:
 			return _plan_val
 		if self.cfg.compile:
-			plan = torch.compile(self._plan, mode="reduce-overhead")
+			plan = torch.compile(self._plan, mode=dev.compile_mode(self.device))
 		else:
 			plan = self._plan
 		self._plan_val = plan
@@ -345,5 +345,5 @@ class TDMPC2(torch.nn.Module):
 		kwargs = {}
 		if task is not None:
 			kwargs["task"] = task
-		torch.compiler.cudagraph_mark_step_begin()
+		dev.mark_step_begin(self.device)
 		return self._update(obs, action, reward, terminated, **kwargs)
