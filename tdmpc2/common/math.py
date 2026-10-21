@@ -44,7 +44,11 @@ def symlog(x):
 	Symmetric logarithmic function.
 	Adapted from https://github.com/danijar/dreamerv3.
 	"""
-	return torch.sign(x) * torch.log(1 + torch.abs(x))
+	negative = x < 0
+	# Select the branch explicitly so the derivative at zero is one.
+	magnitude = torch.where(negative, -x, x)
+	value = torch.log1p(magnitude)
+	return torch.where(negative, -value, value)
 
 
 def symexp(x):
@@ -52,7 +56,11 @@ def symexp(x):
 	Symmetric exponential function.
 	Adapted from https://github.com/danijar/dreamerv3.
 	"""
-	return torch.sign(x) * (torch.exp(torch.abs(x)) - 1)
+	negative = x < 0
+	# Avoid cancellation near zero and preserve the unit derivative there.
+	magnitude = torch.where(negative, -x, x)
+	value = torch.expm1(magnitude)
+	return torch.where(negative, -value, value)
 
 
 def two_hot(x, cfg):
