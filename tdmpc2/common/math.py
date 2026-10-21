@@ -3,7 +3,9 @@ import torch.nn.functional as F
 
 
 def soft_ce(pred, target, cfg):
-	"""Computes the cross entropy loss between predictions and soft targets."""
+	"""Computes scalar regression or categorical soft-target loss."""
+	if cfg.num_bins <= 1:
+		return F.mse_loss(pred, two_hot(target, cfg), reduction="none")
 	pred = F.log_softmax(pred, dim=-1)
 	target = two_hot(target, cfg)
 	return -(target * pred).sum(-1, keepdim=True)
