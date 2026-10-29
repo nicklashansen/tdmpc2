@@ -54,5 +54,4 @@ def make_env(cfg):
 	env = gym_utils.make(MYOSUITE_TASKS[cfg.task])
 	env = MyoSuiteWrapper(env, cfg)
 	env = Timeout(env, max_episode_steps=100)
-	env.max_episode_steps = env._max_episode_steps
 	return env
