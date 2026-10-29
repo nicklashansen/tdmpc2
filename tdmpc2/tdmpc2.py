@@ -228,6 +228,8 @@ class TDMPC2(torch.nn.Module):
 		pi_grad_norm = torch.nn.utils.clip_grad_norm_(self.model._pi.parameters(), self.cfg.grad_clip_norm)
 		self.pi_optim.step()
 		self.pi_optim.zero_grad(set_to_none=True)
+		if self.cfg.multitask:
+			self.model._task_emb.zero_grad(set_to_none=True)
 
 		info = {
 			"pi_loss": pi_loss,
